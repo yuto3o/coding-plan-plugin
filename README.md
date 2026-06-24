@@ -27,15 +27,9 @@
 
 ### New API
 
-支持所有基于 [one-api](https://github.com/songquanpeng/one-api) / [new-api](https://github.com/Calcium-Ion/new-api) 的平台，例如：
-
-- `https://www.cctq.ai`
-- `https://api.ikuncode.cc`
-- 任何其他自定义 Base URL 的平台
+支持所有基于 [one-api](https://github.com/songquanpeng/one-api) / [new-api](https://github.com/Calcium-Ion/new-api) 的平台。你可以添加任意自定义 Base URL。
 
 每个 New API 订阅需要：
-
-- **Base URL**：控制台域名，如 `https://www.cctq.ai`
 - **access token**：在控制台「令牌」或「个人设置」中生成
 - **user ID**：控制台中显示的用户 ID（通常为纯数字）
 - **控制台路径**（可选）：默认为 `/console`

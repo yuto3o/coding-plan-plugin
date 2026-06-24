@@ -1,6 +1,6 @@
 import Foundation
 
-/// 管理 New API 类型服务（cctq.ai / ikuncode.cc 等）的认证信息。
+/// 管理 New API 类型服务的认证信息。
 ///
 /// 把 access_token 与对应的 user_id（New-Api-User 鉴权需要两者配合）合并到统一
 /// Keychain item 中；运行时全程复用内存缓存，避免反复读取 Keychain。

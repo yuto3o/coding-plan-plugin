@@ -26,8 +26,8 @@ enum KeychainError: Error {
 ///     "token_type": "..."
 ///   },
 ///   "newapi": {
-///     "https://www.cctq.ai": { "token": "...", "userID": "..." },
-///     "https://api.ikuncode.cc": { "token": "...", "userID": "..." }
+///     "https://api.example.com": { "token": "...", "userID": "..." },
+///     "https://api.example.org": { "token": "...", "userID": "..." }
 ///   }
 /// }
 /// ```

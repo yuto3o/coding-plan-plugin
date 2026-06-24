@@ -1,7 +1,7 @@
 import Foundation
 
 /// New API（one-api / new-api 衍生）Provider 通用实现。
-/// cctq.ai 与 ikuncode.cc 等可复用此类型。
+/// 任意自定义 Base URL 的 New API 平台均可复用此类型。
 struct NewAPIProvider: Provider {
     let id: String
     let name: String
