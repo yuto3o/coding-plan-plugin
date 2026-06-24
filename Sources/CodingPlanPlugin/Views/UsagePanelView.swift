@@ -43,7 +43,7 @@ struct UsagePanelView: View {
         }
         .onReceive(timer) { _ in
             Task {
-                await refresh()
+                await refreshExisting()
             }
         }
         .sheet(isPresented: $showSettings) {
@@ -147,6 +147,12 @@ struct UsagePanelView: View {
             },
             onAuthenticate: { config in
                 authenticatingConfig = config
+            },
+            onRetry: { config in
+                Task {
+                    await manager.refreshSnapshot(for: config.id)
+                    syncAppState()
+                }
             }
         )
         .environmentObject(manager)
@@ -295,6 +301,14 @@ struct UsagePanelView: View {
         isLoading = true
         defer { isLoading = false }
         await manager.refreshAllSnapshots()
+        syncAppState()
+    }
+
+    private func refreshExisting() async {
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+        await manager.refreshExistingSnapshots()
         syncAppState()
     }
 

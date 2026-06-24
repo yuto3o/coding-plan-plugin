@@ -7,6 +7,7 @@ struct SubscriptionCardList: View {
 
     let onEdit: (ProviderConfiguration) -> Void
     let onAuthenticate: (ProviderConfiguration) -> Void
+    let onRetry: (ProviderConfiguration) -> Void
 
     private var L: LocalizedStrings { languageManager.current.strings }
 
@@ -45,9 +46,7 @@ struct SubscriptionCardList: View {
                         onAuthenticate(config)
                     },
                     onRetry: {
-                        Task {
-                            await manager.refreshSnapshot(for: config.id)
-                        }
+                        onRetry(config)
                     }
                 )
                 .draggable(config.id) {
