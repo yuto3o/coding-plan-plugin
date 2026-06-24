@@ -115,10 +115,8 @@ struct SubscriptionCard: View {
     private func usageContent(_ usage: PlanUsage) -> some View {
         if usage.featureUsages.isEmpty, usage.balance != nil, !usage.periods.isEmpty {
             creditUsageContent(usage)
-        } else if let coding = usage.codingUsage {
-            featureUsageContent(coding)
-        } else if let firstFeature = usage.featureUsages.first {
-            featureUsageContent(firstFeature)
+        } else if !usage.featureUsages.isEmpty {
+            featureUsageContent(usage)
         } else if let total = usage.totalQuota {
             quotaRow(quota: total)
         } else {
@@ -127,40 +125,54 @@ struct SubscriptionCard: View {
     }
 
     @ViewBuilder
-    private func featureUsageContent(_ feature: FeatureUsage) -> some View {
-        let detail = feature.detail
-        let remainingPercent = max(0, min(1, 1.0 - detail.usedPercent))
+    private func featureUsageContent(_ usage: PlanUsage) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            if let weeklyFeature = usage.featureUsages.first {
+                quotaColumn(
+                    title: L.weeklyLimit,
+                    quota: weeklyFeature.detail
+                )
+            }
 
-        HStack(spacing: 8) {
+            if let firstFeature = usage.featureUsages.first,
+               let hourlyLimit = firstFeature.limits.first {
+                quotaColumn(
+                    title: L.hourlyLimit,
+                    quota: hourlyLimit.detail
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func quotaColumn(title: String, quota: Quota) -> some View {
+        let remainingPercent = max(0, min(1, 1.0 - quota.usedPercent))
+
+        HStack(spacing: 6) {
             CircularProgressView(percent: remainingPercent, color: barColor(for: remainingPercent))
                 .frame(width: 34, height: 34)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(detail.remaining)
-                    .font(.caption)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.caption2)
                     .fontWeight(.medium)
+                    .lineLimit(1)
+
+                Text("\(quota.remaining) / \(quota.limit)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                     .monospacedDigit()
 
-                HStack(spacing: 4) {
-                    Text("\(L.total): \(detail.limit)")
+                if let resetTime = quota.resetTime {
+                    CountdownLabel(target: resetTime, prefix: "\(L.reset): ", language: languageManager.current)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
-
-                    if let resetTime = detail.resetTime {
-                        Text("·")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        CountdownLabel(target: resetTime, prefix: "\(L.reset): ", language: languageManager.current)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
                 }
             }
-
-            Spacer()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -170,8 +182,8 @@ struct SubscriptionCard: View {
                 totalQuotaColumn(total: total, monthlyUsed: usage.periods.first?.quotaUsed ?? 0)
             }
 
-            if usage.periods.count > 1 {
-                weeklyRingColumn(breakdown: usage.periods[1])
+            if let weekly = usage.periods.dropFirst().first {
+                weeklyRingColumn(breakdown: weekly)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
