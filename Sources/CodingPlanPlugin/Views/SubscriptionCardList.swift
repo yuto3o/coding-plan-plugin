@@ -3,7 +3,6 @@ import SwiftUI
 struct SubscriptionCardList: View {
     @EnvironmentObject private var manager: ProviderManager
     @EnvironmentObject private var languageManager: LanguageManager
-    @State private var configToDelete: ProviderConfiguration? = nil
 
     let onEdit: (ProviderConfiguration) -> Void
     let onAuthenticate: (ProviderConfiguration) -> Void
@@ -41,7 +40,7 @@ struct SubscriptionCardList: View {
                         onEdit(config)
                     },
                     onDelete: {
-                        configToDelete = config
+                        manager.remove(id: config.id)
                     },
                     onAuthenticate: {
                         onAuthenticate(config)
@@ -73,22 +72,6 @@ struct SubscriptionCardList: View {
                     return true
                 }
             }
-        }
-        .alert(L.deleteSubscriptionTitle, isPresented: Binding(
-            get: { configToDelete != nil },
-            set: { if !$0 { configToDelete = nil } }
-        )) {
-            Button(L.cancel, role: .cancel) {
-                configToDelete = nil
-            }
-            Button(L.delete, role: .destructive) {
-                if let config = configToDelete {
-                    manager.remove(id: config.id)
-                }
-                configToDelete = nil
-            }
-        } message: {
-            Text(L.deleteSubscriptionMessage)
         }
     }
 }

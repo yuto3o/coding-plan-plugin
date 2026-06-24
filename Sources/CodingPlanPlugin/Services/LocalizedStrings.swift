@@ -69,9 +69,7 @@ struct LocalizedStrings {
     }
     var displayName: String { localize(zh: "显示名称", en: "Display Name") }
     var type: String { localize(zh: "类型", en: "Type") }
-    var baseURLPlaceholder: String {
-        localize(zh: "Base URL，如 https://www.cctq.ai", en: "Base URL, e.g. https://www.cctq.ai")
-    }
+    var baseURLPlaceholder: String { localize(zh: "Base URL", en: "Base URL") }
     var consolePathPlaceholder: String { localize(zh: "控制台路径（可选）", en: "Console Path (optional)") }
 
     // MARK: - Device Login

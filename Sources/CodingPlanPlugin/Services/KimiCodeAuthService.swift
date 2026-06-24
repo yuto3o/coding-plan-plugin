@@ -2,8 +2,8 @@ import Foundation
 
 /// 独立管理 Kimi Code OAuth token。
 ///
-/// 与 Kimi Code CLI 完全解耦：token 仅存储在插件自己的 Keychain item 中。
-/// 支持多账号：每个 ProviderConfiguration id 对应独立的 Keychain account。
+/// 与 Kimi Code CLI 完全解耦：token 存储在插件统一 Keychain item 中。
+/// 支持多账号：每个 ProviderConfiguration id 对应独立的内存缓存实例。
 actor KimiCodeAuthService {
     static let shared = KimiCodeAuthService(id: "kimi")
 
@@ -11,7 +11,6 @@ actor KimiCodeAuthService {
     private static let oauthHost = "https://auth.kimi.com"
 
     let id: String
-    private let tokenAccount: String
 
     private let session: URLSession
     private let decoder: JSONDecoder
@@ -20,22 +19,21 @@ actor KimiCodeAuthService {
 
     init(id: String = "kimi") {
         self.id = id
-        self.tokenAccount = id == "kimi" ? "kimi-code.oauth_token" : "kimi-code.\(id).oauth_token"
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 60
         self.session = URLSession(configuration: config)
         self.decoder = JSONDecoder()
+
+        // 首次初始化时，尝试把旧独立 Keychain item 迁移到统一存储。
+        let legacyAccount = id == "kimi" ? "kimi-code.oauth_token" : "kimi-code.\(id).oauth_token"
+        KeychainStorage.shared.migrateLegacyKimiToken(account: legacyAccount)
     }
 
     // MARK: - Public
 
     nonisolated var isAuthenticated: Bool {
-        guard let json = try? KeychainStorage.shared.get(account: tokenAccount),
-              let data = json.data(using: .utf8),
-              let token = try? JSONDecoder().decode(OAuthToken.self, from: data) else {
-            return false
-        }
+        guard let token = KeychainStorage.shared.kimiToken() else { return false }
         return !token.accessToken.isEmpty
     }
 
@@ -44,13 +42,13 @@ actor KimiCodeAuthService {
             return inMemoryToken.accessToken
         }
 
-        guard let token = try? loadTokenFromKeychain() else {
+        guard let token = KeychainStorage.shared.kimiToken() else {
             throw .notAuthenticated
         }
 
         if token.isExpired(withBuffer: 60) {
             let refreshed = try await refreshToken(token)
-            try? saveTokenToKeychain(refreshed)
+            KeychainStorage.shared.setKimiToken(refreshed)
             inMemoryToken = refreshed
             return refreshed.accessToken
         }
@@ -114,7 +112,7 @@ actor KimiCodeAuthService {
             if httpResponse.statusCode == 200 {
                 do {
                     let token = try decoder.decode(OAuthToken.self, from: data)
-                    try? saveTokenToKeychain(token)
+                    KeychainStorage.shared.setKimiToken(token)
                     inMemoryToken = token
                     return token
                 } catch {
@@ -150,25 +148,7 @@ actor KimiCodeAuthService {
     }
 
     nonisolated func clearAuthentication() {
-        try? KeychainStorage.shared.delete(account: tokenAccount)
-    }
-
-    // MARK: - Private
-
-    private func loadTokenFromKeychain() throws -> OAuthToken {
-        let json = try KeychainStorage.shared.get(account: tokenAccount)
-        guard let data = json.data(using: .utf8) else {
-            throw ProviderError.notAuthenticated
-        }
-        return try decoder.decode(OAuthToken.self, from: data)
-    }
-
-    private func saveTokenToKeychain(_ token: OAuthToken) throws {
-        let data = try JSONEncoder().encode(token)
-        guard let json = String(data: data, encoding: .utf8) else {
-            throw ProviderError.unknown
-        }
-        try KeychainStorage.shared.set(json, account: tokenAccount)
+        KeychainStorage.shared.setKimiToken(nil)
     }
 
     private func refreshToken(_ token: OAuthToken) async throws(ProviderError) -> OAuthToken {

@@ -28,10 +28,6 @@ struct ProviderConfiguration: Codable, Identifiable, Sendable {
         self.consolePath = consolePath
     }
 
-    /// 内置默认配置
-    static let defaults: [ProviderConfiguration] = [
-        ProviderConfiguration(type: .kimi, name: "Kimi Code"),
-        ProviderConfiguration(type: .newAPI, name: "CCTQ", baseURL: "https://www.cctq.ai"),
-        ProviderConfiguration(type: .newAPI, name: "IkunCode", baseURL: "https://api.ikuncode.cc")
-    ]
+    /// 默认不预置任何 Provider，用户通过主面板加号自行添加。
+    static let defaults: [ProviderConfiguration] = []
 }

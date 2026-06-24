@@ -1,111 +1,9 @@
 import SwiftUI
 
-struct ProviderSettingsView: View {
-    @StateObject private var manager = ProviderManager.shared
-    @EnvironmentObject private var languageManager: LanguageManager
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var showAddSheet = false
-    @State private var editingConfig: ProviderConfiguration? = nil
-
-    private var L: LocalizedStrings { languageManager.current.strings }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text(L.subscriptions)
-                    .font(.headline)
-                Spacer()
-                Button(L.done) {
-                    dismiss()
-                }
-            }
-
-            List {
-                ForEach(manager.configurations) { config in
-                    ProviderConfigRow(config: config) {
-                        editingConfig = config
-                    }
-                }
-                .onDelete { indexSet in
-                    for index in indexSet {
-                        let config = manager.configurations[index]
-                        manager.remove(id: config.id)
-                    }
-                }
-            }
-            .listStyle(.plain)
-
-            HStack {
-                Button {
-                    showAddSheet = true
-                } label: {
-                    Label(L.addSubscription, systemImage: "plus")
-                }
-
-                Spacer()
-
-                Button {
-                    manager.resetToDefaults()
-                } label: {
-                    Label(L.resetDefaults, systemImage: "arrow.counterclockwise")
-                }
-                .buttonStyle(.borderless)
-            }
-        }
-        .padding()
-        .frame(minWidth: 520, minHeight: 400)
-        .sheet(isPresented: $showAddSheet) {
-            ProviderEditView(config: nil, onSave: { newConfig in
-                manager.add(newConfig)
-                showAddSheet = false
-            })
-            .frame(minWidth: 400, minHeight: 260)
-            .environmentObject(languageManager)
-        }
-        .sheet(item: $editingConfig) { config in
-            ProviderEditView(config: config, onSave: { updated in
-                manager.update(updated)
-                editingConfig = nil
-            })
-            .frame(minWidth: 400, minHeight: 260)
-            .environmentObject(languageManager)
-        }
-    }
-}
-
-struct ProviderConfigRow: View {
-    let config: ProviderConfiguration
-    let onEdit: () -> Void
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(config.name)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                Text(config.type.displayName + (config.baseURL.map { " · \($0)" } ?? ""))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            Button {
-                onEdit()
-            } label: {
-                Image(systemName: "pencil")
-            }
-            .buttonStyle(.borderless)
-        }
-        .padding(.vertical, 4)
-    }
-}
-
 struct ProviderEditView: View {
     let config: ProviderConfiguration?
     let onSave: (ProviderConfiguration) -> Void
+    var onCancel: (() -> Void)? = nil
 
     @EnvironmentObject private var languageManager: LanguageManager
     @Environment(\.dismiss) private var dismiss
@@ -117,57 +15,113 @@ struct ProviderEditView: View {
     private var L: LocalizedStrings { languageManager.current.strings }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(config == nil ? L.addSubscriptionTitle : L.editSubscriptionTitle)
-                .font(.headline)
+        VStack {
+            Spacer()
 
-            Form {
-                TextField(L.displayName, text: $name)
+            VStack(alignment: .leading, spacing: 20) {
+                Text(config == nil ? L.addSubscriptionTitle : L.editSubscriptionTitle)
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
-                Picker(L.type, selection: $type) {
-                    ForEach(ProviderType.allCases, id: \.self) { t in
-                        Text(t.displayName).tag(t)
+                VStack(alignment: .leading, spacing: 14) {
+                    labeledField(title: L.displayName) {
+                        TextField("", text: $name)
+                            .textFieldStyle(.roundedBorder)
+                    }
+
+                    labeledField(title: L.type) {
+                        Picker("", selection: $type) {
+                            ForEach(ProviderType.allCases, id: \.self) { t in
+                                Text(t.displayName).tag(t)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+
+                    if type == .newAPI {
+                        labeledField(title: L.baseURLPlaceholder) {
+                            TextField("https://", text: $baseURL)
+                                .textFieldStyle(.roundedBorder)
+                        }
+
+                        labeledField(title: L.consolePathPlaceholder) {
+                            TextField("/console", text: $consolePath)
+                                .textFieldStyle(.roundedBorder)
+                        }
                     }
                 }
-                .pickerStyle(.segmented)
 
-                if type == .newAPI {
-                    TextField(L.baseURLPlaceholder, text: $baseURL)
-                    TextField(L.consolePathPlaceholder, text: $consolePath)
+                HStack {
+                    Button(L.cancel) {
+                        if let onCancel {
+                            onCancel()
+                        } else {
+                            dismiss()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+
+                    Spacer()
+
+                    Button(L.save) {
+                        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let trimmedURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmedName.isEmpty else { return }
+
+                        let newConfig = ProviderConfiguration(
+                            id: config?.id ?? UUID().uuidString,
+                            type: type,
+                            name: trimmedName,
+                            baseURL: type == .newAPI ? trimmedURL : nil,
+                            consolePath: type == .newAPI ? (consolePath.isEmpty ? "/console" : consolePath) : nil
+                        )
+                        onSave(newConfig)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(type == .newAPI && baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
+                .padding(.top, 4)
             }
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(NSColor.controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.08), radius: 12, x: 0, y: 4)
+            .padding(.horizontal, 20)
 
-            HStack {
-                Button(L.cancel) {
-                    dismiss()
-                }
-                Spacer()
-                Button(L.save) {
-                    let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let trimmedURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmedName.isEmpty else { return }
-
-                    let newConfig = ProviderConfiguration(
-                        id: config?.id ?? UUID().uuidString,
-                        type: type,
-                        name: trimmedName,
-                        baseURL: type == .newAPI ? trimmedURL : nil,
-                        consolePath: type == .newAPI ? (consolePath.isEmpty ? "/console" : consolePath) : nil
-                    )
-                    onSave(newConfig)
-                }
-                .disabled(type == .newAPI && baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
+            Spacer()
         }
-        .padding()
-        .frame(minWidth: 400)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
             if let config {
                 name = config.name
                 type = config.type
                 baseURL = config.baseURL ?? ""
                 consolePath = config.consolePath ?? "/console"
+            } else {
+                name = ""
+                type = .newAPI
+                baseURL = ""
+                consolePath = "/console"
             }
+        }
+    }
+
+    @ViewBuilder
+    private func labeledField<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            content()
         }
     }
 }

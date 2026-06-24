@@ -64,6 +64,8 @@ final class ProviderManager: ObservableObject {
     }
 
     func resetToDefaults() {
+        // 清空所有 Keychain 凭证，避免下次启动时再次自动恢复。
+        KeychainStorage.shared.clearAll()
         configurations = ProviderConfiguration.defaults
         selectedID = configurations.first?.id
         usageSnapshots.removeAll()
@@ -72,27 +74,13 @@ final class ProviderManager: ObservableObject {
 
     // MARK: - Token helpers
 
-    func saveToken(_ token: String, for configID: String) {
-        guard let config = configurations.first(where: { $0.id == configID }) else { return }
-        let account = Self.tokenAccount(for: config)
-        try? KeychainStorage.shared.set(token, account: account)
-    }
-
-    func token(for configID: String) -> String? {
-        guard let config = configurations.first(where: { $0.id == configID }) else { return nil }
-        let account = Self.tokenAccount(for: config)
-        return try? KeychainStorage.shared.get(account: account)
-    }
-
     func clearToken(for config: ProviderConfiguration) {
-        let account = Self.tokenAccount(for: config)
-        try? KeychainStorage.shared.delete(account: account)
-
-        // NewAPI 新版把 token + userID 合并存到单个 account，删除时一起清理。
-        if config.type == .newAPI {
-            let host = URL(string: config.baseURL ?? "")?.host ?? config.baseURL ?? "unknown"
-            let credentialsAccount = "newapi.\(host).credentials"
-            try? KeychainStorage.shared.delete(account: credentialsAccount)
+        switch config.type {
+        case .kimi:
+            KimiCodeAuthService(id: config.id).clearAuthentication()
+        case .newAPI:
+            guard let baseURL = config.baseURL, !baseURL.isEmpty else { return }
+            NewAPIAuthService.service(for: baseURL).clear()
         }
     }
 
@@ -171,11 +159,29 @@ final class ProviderManager: ObservableObject {
     }
 
     private static func loadConfigurations() -> [ProviderConfiguration] {
-        guard let data = UserDefaults.standard.data(forKey: Self.configKey),
-              let configs = try? JSONDecoder().decode([ProviderConfiguration].self, from: data),
-              !configs.isEmpty else {
-            return ProviderConfiguration.defaults
+        if let data = UserDefaults.standard.data(forKey: Self.configKey),
+           let configs = try? JSONDecoder().decode([ProviderConfiguration].self, from: data) {
+            // 用户已手动管理过订阅列表（即使是空数组也尊重），不再自动恢复。
+            return configs
         }
+
+        // 首次启动且 UserDefaults 没有记录时，尝试从统一 Keychain 恢复历史订阅。
+        return configurationsFromKeychain()
+    }
+
+    private static func configurationsFromKeychain() -> [ProviderConfiguration] {
+        let storage = KeychainStorage.shared
+        var configs: [ProviderConfiguration] = []
+
+        if storage.kimiToken() != nil {
+            configs.append(ProviderConfiguration(type: .kimi, name: "Kimi Code"))
+        }
+
+        for baseURL in storage.allNewAPIBaseURLs() {
+            let host = URL(string: baseURL)?.host ?? baseURL
+            configs.append(ProviderConfiguration(type: .newAPI, name: host, baseURL: baseURL))
+        }
+
         return configs
     }
 
@@ -194,13 +200,4 @@ final class ProviderManager: ObservableObject {
         }
     }
 
-    private static func tokenAccount(for config: ProviderConfiguration) -> String {
-        switch config.type {
-        case .kimi:
-            return "kimi.access_token"
-        case .newAPI:
-            let host = URL(string: config.baseURL ?? "")?.host ?? config.baseURL ?? "unknown"
-            return "newapi.\(host).access_token"
-        }
-    }
 }

@@ -17,6 +17,12 @@ enum ProviderError: Error, CustomStringConvertible {
         case .decoding(let error):
             return "解析失败：\(error.localizedDescription)"
         case .api(let code, let message):
+            if code == "api_error", let message {
+                let lowercased = message.lowercased()
+                if lowercased.contains("access") {
+                    return "Access token 或 User ID 不正确，请检查控制台信息"
+                }
+            }
             return "接口错误 [\(code)]：\(message ?? "无详细说明")"
         case .unknown:
             return "未知错误"

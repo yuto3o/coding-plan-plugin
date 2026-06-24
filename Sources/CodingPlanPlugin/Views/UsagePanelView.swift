@@ -6,7 +6,6 @@ struct UsagePanelView: View {
     @EnvironmentObject private var languageManager: LanguageManager
 
     @State private var isLoading = false
-    @State private var showSettings = false
     @State private var showAddSheet = false
     @State private var editingConfig: ProviderConfiguration? = nil
     @State private var authenticatingConfig: ProviderConfiguration? = nil
@@ -19,7 +18,61 @@ struct UsagePanelView: View {
 
     private let timer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
 
+    private var anyOverlayShowing: Bool {
+        showAddSheet || editingConfig != nil || authenticatingConfig != nil || deviceAuth != nil
+    }
+
     var body: some View {
+        ZStack {
+            mainContent
+                .disabled(anyOverlayShowing)
+                .opacity(anyOverlayShowing ? 0.5 : 1.0)
+
+            if showAddSheet {
+                addSubscriptionOverlay
+            }
+
+            if let config = editingConfig {
+                editSubscriptionOverlay(for: config)
+            }
+
+            if let config = authenticatingConfig {
+                authenticationOverlay(for: config)
+            }
+
+            if let auth = deviceAuth {
+                DeviceLoginView(
+                    userCode: auth.userCode,
+                    verificationURL: auth.verificationUriComplete,
+                    onCancel: {
+                        loginTask?.cancel()
+                        loginTask = nil
+                        deviceAuth = nil
+                    }
+                )
+                .environmentObject(languageManager)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(NSColor.windowBackgroundColor))
+            }
+        }
+        .frame(width: 400)
+        .onReceive(timer) { _ in
+            Task {
+                await refreshExisting()
+            }
+        }
+        .onAppear {
+            Task {
+                await refreshMissingSnapshots()
+            }
+        }
+        .onChange(of: manager.selectedID) { _ in
+            syncAppStateForCurrent()
+        }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             headerView
 
@@ -37,57 +90,6 @@ struct UsagePanelView: View {
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 16)
-        .frame(width: 400)
-        .onReceive(timer) { _ in
-            Task {
-                await refreshExisting()
-            }
-        }
-        .sheet(isPresented: $showSettings) {
-            ProviderSettingsView()
-                .frame(minWidth: 520, minHeight: 400)
-                .environmentObject(languageManager)
-        }
-        .sheet(isPresented: $showAddSheet) {
-            ProviderEditView(config: nil) { newConfig in
-                manager.add(newConfig)
-                showAddSheet = false
-                Task {
-                    await manager.refreshSnapshot(for: newConfig.id)
-                }
-            }
-            .frame(minWidth: 400, minHeight: 260)
-            .environmentObject(languageManager)
-        }
-        .sheet(item: $editingConfig) { config in
-            ProviderEditView(config: config) { updated in
-                manager.update(updated)
-                editingConfig = nil
-                Task {
-                    await manager.refreshSnapshot(for: updated.id)
-                }
-            }
-            .frame(minWidth: 400, minHeight: 260)
-            .environmentObject(languageManager)
-        }
-        .sheet(item: $authenticatingConfig) { config in
-            authenticationSheet(for: config)
-        }
-        .sheet(item: $deviceAuth) { auth in
-            DeviceLoginView(
-                userCode: auth.userCode,
-                verificationURL: auth.verificationUriComplete,
-                onCancel: {
-                    loginTask?.cancel()
-                    loginTask = nil
-                    deviceAuth = nil
-                }
-            )
-            .environmentObject(languageManager)
-        }
-        .onChange(of: manager.selectedID) { _ in
-            syncAppStateForCurrent()
-        }
     }
 
     // MARK: - Header
@@ -122,13 +124,6 @@ struct UsagePanelView: View {
             }
             .menuStyle(.borderlessButton)
             .frame(width: 28)
-
-            Button {
-                showSettings = true
-            } label: {
-                Image(systemName: "gearshape")
-            }
-            .buttonStyle(.borderless)
 
             if isLoading {
                 ProgressView()
@@ -250,67 +245,149 @@ struct UsagePanelView: View {
     }
 
     @ViewBuilder
-    private func authenticationSheet(for config: ProviderConfiguration) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(config.name)
-                .font(.headline)
-
-            if config.type == .newAPI {
-                VStack(spacing: 12) {
-                    SecureField(L.pasteAccessToken, text: $accessTokenInput)
-                        .textFieldStyle(.roundedBorder)
-
-                    TextField(L.userID, text: $userIDInput)
-                        .textFieldStyle(.roundedBorder)
+    private var addSubscriptionOverlay: some View {
+        ProviderEditView(
+            config: nil,
+            onSave: { newConfig in
+                manager.add(newConfig)
+                showAddSheet = false
+                Task {
+                    await manager.refreshSnapshot(for: newConfig.id)
                 }
+            },
+            onCancel: {
+                showAddSheet = false
+            }
+        )
+        .environmentObject(languageManager)
+    }
 
-                HStack {
-                    Button(L.cancel) {
-                        authenticatingConfig = nil
-                        accessTokenInput = ""
-                        userIDInput = ""
-                    }
-                    Spacer()
-                    Button(L.saveAndRefresh) {
-                        let token = accessTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let userID = userIDInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !token.isEmpty, !userID.isEmpty,
-                              let provider = manager.provider(for: config.id) else { return }
-                        provider.saveAccessToken(token, userID: userID)
-                        accessTokenInput = ""
-                        userIDInput = ""
-                        authenticatingConfig = nil
-                        Task {
-                            await manager.refreshSnapshot(for: config.id)
-                            syncAppState(for: config.id)
+    @ViewBuilder
+    private func editSubscriptionOverlay(for config: ProviderConfiguration) -> some View {
+        ProviderEditView(
+            config: config,
+            onSave: { updated in
+                manager.update(updated)
+                editingConfig = nil
+                Task {
+                    await manager.refreshSnapshot(for: updated.id)
+                }
+            },
+            onCancel: {
+                editingConfig = nil
+            }
+        )
+        .environmentObject(languageManager)
+    }
+
+    @ViewBuilder
+    private func authenticationOverlay(for config: ProviderConfiguration) -> some View {
+        VStack {
+            Spacer()
+
+            VStack(alignment: .leading, spacing: 20) {
+                Text(config.name)
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity, alignment: .center)
+
+                if config.type == .newAPI {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text(L.newAPILoginHint)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(L.pasteAccessToken)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            SecureField("", text: $accessTokenInput)
+                                .textFieldStyle(.roundedBorder)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(L.userID)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextField("", text: $userIDInput)
+                                .textFieldStyle(.roundedBorder)
                         }
                     }
-                    .disabled(
-                        accessTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || userIDInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    )
-                }
-            } else {
-                Text(L.kimLoginHint)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
 
-                HStack {
-                    Button(L.cancel) {
-                        authenticatingConfig = nil
+                    HStack {
+                        Button(L.cancel) {
+                            authenticatingConfig = nil
+                            accessTokenInput = ""
+                            userIDInput = ""
+                        }
+                        .buttonStyle(.bordered)
+
+                        Spacer()
+
+                        Button(L.saveAndRefresh) {
+                            let token = accessTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let userID = userIDInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !token.isEmpty, !userID.isEmpty,
+                                  let provider = manager.provider(for: config.id) else { return }
+                            provider.saveAccessToken(token, userID: userID)
+                            accessTokenInput = ""
+                            userIDInput = ""
+                            authenticatingConfig = nil
+                            Task {
+                                await manager.refreshSnapshot(for: config.id)
+                                syncAppState(for: config.id)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(
+                            accessTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || userIDInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        )
                     }
-                    Spacer()
-                    Button(L.login) {
-                        authenticatingConfig = nil
-                        loginTask?.cancel()
-                        loginTask = Task { await startKimiLogin(providerID: config.id) }
+                    .padding(.top, 4)
+                } else {
+                    Text(L.kimLoginHint)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+
+                    HStack {
+                        Button(L.cancel) {
+                            authenticatingConfig = nil
+                        }
+                        .buttonStyle(.bordered)
+
+                        Spacer()
+
+                        Button(L.login) {
+                            authenticatingConfig = nil
+                            loginTask?.cancel()
+                            loginTask = Task { await startKimiLogin(providerID: config.id) }
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
+                    .padding(.top, 4)
                 }
             }
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(NSColor.controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.08), radius: 12, x: 0, y: 4)
+            .padding(.horizontal, 20)
+
+            Spacer()
         }
-        .padding()
-        .frame(minWidth: 360)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(NSColor.windowBackgroundColor))
     }
 
     private func refresh() async {
@@ -326,6 +403,24 @@ struct UsagePanelView: View {
         isLoading = true
         defer { isLoading = false }
         await manager.refreshExistingSnapshots()
+        syncAppStateForCurrent()
+    }
+
+    private func refreshMissingSnapshots() async {
+        let missingIDs = manager.configurations.compactMap { config in
+            manager.usageSnapshots[config.id] == nil ? config.id : nil
+        }
+        guard !missingIDs.isEmpty else { return }
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+        await withTaskGroup(of: Void.self) { group in
+            for id in missingIDs {
+                group.addTask {
+                    await self.manager.refreshSnapshot(for: id)
+                }
+            }
+        }
         syncAppStateForCurrent()
     }
 
