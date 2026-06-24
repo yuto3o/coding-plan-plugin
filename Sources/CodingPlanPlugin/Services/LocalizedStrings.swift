@@ -16,6 +16,7 @@ struct LocalizedStrings {
     var add: String { localize(zh: "添加", en: "Add") }
     var login: String { localize(zh: "登录", en: "Login") }
     var actions: String { localize(zh: "操作", en: "Actions") }
+    var delete: String { localize(zh: "删除", en: "Delete") }
 
     // MARK: - Usage Panel
 
@@ -60,8 +61,12 @@ struct LocalizedStrings {
     var addSubscriptionTitle: String { localize(zh: "添加订阅", en: "Add Subscription") }
     var editSubscriptionTitle: String { localize(zh: "编辑订阅", en: "Edit Subscription") }
     var deleteSubscriptionTitle: String { localize(zh: "删除订阅", en: "Delete Subscription") }
-    var deleteSubscriptionMessage: String { localize(zh: "确定要删除这条订阅吗？此操作无法撤销。", en: "Are you sure you want to delete this subscription? This action cannot be undone.") }
-    var delete: String { localize(zh: "删除", en: "Delete") }
+    var deleteSubscriptionMessage: String {
+        localize(
+            zh: "确定要删除这个订阅吗？此操作不会清空服务端数据。",
+            en: "Are you sure you want to delete this subscription? This will not remove data from the server."
+        )
+    }
     var displayName: String { localize(zh: "显示名称", en: "Display Name") }
     var type: String { localize(zh: "类型", en: "Type") }
     var baseURLPlaceholder: String {
