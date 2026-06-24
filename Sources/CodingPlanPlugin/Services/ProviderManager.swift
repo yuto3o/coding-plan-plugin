@@ -113,6 +113,7 @@ final class ProviderManager: ObservableObject {
 
         do {
             let usage = try await provider.fetchUsage()
+            guard configurations.contains(where: { $0.id == id }) else { return }
             usageSnapshots[id] = ProviderUsageSnapshot(
                 usage: usage,
                 isLoading: false,
@@ -123,6 +124,7 @@ final class ProviderManager: ObservableObject {
             if case .notAuthenticated = error {
                 provider.clearAuthentication()
             }
+            guard configurations.contains(where: { $0.id == id }) else { return }
             usageSnapshots[id] = ProviderUsageSnapshot(
                 usage: usageSnapshots[id]?.usage,
                 isLoading: false,

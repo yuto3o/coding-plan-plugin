@@ -343,9 +343,10 @@ struct UsagePanelView: View {
             await MainActor.run {
                 deviceAuth = nil
                 loginTask = nil
-                appState.lastError = error
             }
             await manager.refreshSnapshot(for: providerID)
+            syncAppState()
+            appState.lastError = error
         }
     }
 }
