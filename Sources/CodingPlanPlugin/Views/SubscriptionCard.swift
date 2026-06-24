@@ -15,39 +15,33 @@ struct SubscriptionCard: View {
     private var L: LocalizedStrings { languageManager.current.strings }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(config.name)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(config.name)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
 
-                Spacer()
+                    Spacer()
 
-                Button(action: onEdit) {
-                    Image(systemName: "pencil")
+                    Button(action: onEdit) {
+                        Image(systemName: "pencil")
+                    }
+                    .buttonStyle(.borderless)
+
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
                 }
-                .buttonStyle(.borderless)
 
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
+                content
             }
-
-            content
+            .padding(10)
+            .contentShape(Rectangle())
         }
-        .padding(10)
-        .background(isSelected ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.08))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.5)
-        )
-        .cornerRadius(8)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onSelect()
-        }
+        .buttonStyle(CardButtonStyle(isSelected: isSelected))
     }
 
     @ViewBuilder
@@ -158,11 +152,6 @@ struct SubscriptionCard: View {
                     .font(.caption2)
                     .fontWeight(.medium)
                     .lineLimit(1)
-
-                Text("\(quota.remaining) / \(quota.limit)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
 
                 if let resetTime = quota.resetTime {
                     CountdownLabel(target: resetTime, prefix: "\(L.reset): ", language: languageManager.current)
@@ -302,5 +291,20 @@ struct SubscriptionCard: View {
         } else {
             return String(format: "%.1f%@", value, suffix)
         }
+    }
+}
+
+struct CardButtonStyle: ButtonStyle {
+    let isSelected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.08))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.5)
+            )
+            .cornerRadius(8)
+            .opacity(configuration.isPressed ? 0.9 : 1.0)
     }
 }

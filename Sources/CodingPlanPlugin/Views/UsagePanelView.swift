@@ -38,9 +38,6 @@ struct UsagePanelView: View {
         .padding(.horizontal, 28)
         .padding(.vertical, 16)
         .frame(width: 400)
-        .task {
-            await refresh()
-        }
         .onReceive(timer) { _ in
             Task {
                 await refreshExisting()
