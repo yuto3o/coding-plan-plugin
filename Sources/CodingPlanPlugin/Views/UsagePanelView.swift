@@ -39,11 +39,11 @@ struct UsagePanelView: View {
         .padding(.vertical, 16)
         .frame(width: 400)
         .task {
-            await manager.refreshAllSnapshots()
+            await refresh()
         }
         .onReceive(timer) { _ in
             Task {
-                await manager.refreshExistingSnapshots()
+                await refresh()
             }
         }
         .sheet(isPresented: $showSettings) {
