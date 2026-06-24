@@ -55,6 +55,8 @@ struct SubscriptionCard: View {
         if let snapshot {
             if snapshot.isLoading && snapshot.usage == nil {
                 loadingPlaceholder
+            } else if case .notAuthenticated = snapshot.error {
+                notSignedInPlaceholder
             } else if let error = snapshot.error {
                 errorPlaceholder(error)
             } else if let usage = snapshot.usage {
