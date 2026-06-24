@@ -115,8 +115,10 @@ struct SubscriptionCard: View {
     private func usageContent(_ usage: PlanUsage) -> some View {
         if usage.featureUsages.isEmpty, usage.balance != nil, !usage.periods.isEmpty {
             creditUsageContent(usage)
-        } else if let feature = usage.codingUsage {
-            featureUsageContent(feature)
+        } else if let coding = usage.codingUsage {
+            featureUsageContent(coding)
+        } else if let firstFeature = usage.featureUsages.first {
+            featureUsageContent(firstFeature)
         } else if let total = usage.totalQuota {
             quotaRow(quota: total)
         } else {
@@ -139,10 +141,22 @@ struct SubscriptionCard: View {
                     .fontWeight(.medium)
                     .monospacedDigit()
 
-                Text("\(L.total): \(detail.limit)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                HStack(spacing: 4) {
+                    Text("\(L.total): \(detail.limit)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+
+                    if let resetTime = detail.resetTime {
+                        Text("·")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        CountdownLabel(target: resetTime, prefix: "\(L.reset): ", language: languageManager.current)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
             }
 
             Spacer()

@@ -88,6 +88,9 @@ struct UsagePanelView: View {
             )
             .environmentObject(languageManager)
         }
+        .onChange(of: manager.selectedID) { _ in
+            syncAppStateForCurrent()
+        }
     }
 
     // MARK: - Header
