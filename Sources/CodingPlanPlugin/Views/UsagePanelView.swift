@@ -151,7 +151,7 @@ struct UsagePanelView: View {
             onRetry: { config in
                 Task {
                     await manager.refreshSnapshot(for: config.id)
-                    syncAppState()
+                    syncAppState(for: config.id)
                 }
             }
         )
@@ -198,14 +198,13 @@ struct UsagePanelView: View {
 
             Spacer()
 
-            if let provider = manager.currentProvider, provider.isAuthenticated {
+            if let provider = manager.currentProvider, provider.isAuthenticated,
+               let configID = manager.currentConfiguration?.id {
                 Button {
                     provider.clearAuthentication()
-                    if let configID = manager.currentConfiguration?.id {
-                        Task {
-                            await manager.refreshSnapshot(for: configID)
-                            syncAppState()
-                        }
+                    Task {
+                        await manager.refreshSnapshot(for: configID)
+                        syncAppState(for: configID)
                     }
                 } label: {
                     Label(L.logout, systemImage: "person.crop.circle.badge.xmark")
@@ -231,6 +230,20 @@ struct UsagePanelView: View {
     }
 
     // MARK: - Actions
+
+    private func syncAppState(for configID: String) {
+        guard let snapshot = manager.usageSnapshots[configID] else {
+            if manager.currentConfiguration?.id == configID {
+                appState.lastUsage = nil
+                appState.lastError = nil
+            }
+            return
+        }
+        if manager.currentConfiguration?.id == configID {
+            appState.lastUsage = snapshot.usage
+            appState.lastError = snapshot.error
+        }
+    }
 
     @ViewBuilder
     private func authenticationSheet(for config: ProviderConfiguration) -> some View {
@@ -265,7 +278,7 @@ struct UsagePanelView: View {
                         authenticatingConfig = nil
                         Task {
                             await manager.refreshSnapshot(for: config.id)
-                            syncAppState()
+                            syncAppState(for: config.id)
                         }
                     }
                     .disabled(
@@ -301,7 +314,7 @@ struct UsagePanelView: View {
         isLoading = true
         defer { isLoading = false }
         await manager.refreshAllSnapshots()
-        syncAppState()
+        syncAppStateForCurrent()
     }
 
     private func refreshExisting() async {
@@ -309,18 +322,16 @@ struct UsagePanelView: View {
         isLoading = true
         defer { isLoading = false }
         await manager.refreshExistingSnapshots()
-        syncAppState()
+        syncAppStateForCurrent()
     }
 
-    private func syncAppState() {
-        guard let configID = manager.currentConfiguration?.id,
-              let snapshot = manager.usageSnapshots[configID] else {
+    private func syncAppStateForCurrent() {
+        guard let configID = manager.currentConfiguration?.id else {
             appState.lastUsage = nil
             appState.lastError = nil
             return
         }
-        appState.lastUsage = snapshot.usage
-        appState.lastError = snapshot.error
+        syncAppState(for: configID)
     }
 
     private func startKimiLogin(providerID: String) async {
@@ -345,7 +356,7 @@ struct UsagePanelView: View {
                 loginTask = nil
             }
             await manager.refreshSnapshot(for: providerID)
-            syncAppState()
+            syncAppState(for: providerID)
             appState.lastError = error
         }
     }

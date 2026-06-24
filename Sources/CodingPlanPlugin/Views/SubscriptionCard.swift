@@ -115,10 +115,37 @@ struct SubscriptionCard: View {
     private func usageContent(_ usage: PlanUsage) -> some View {
         if usage.featureUsages.isEmpty, usage.balance != nil, !usage.periods.isEmpty {
             creditUsageContent(usage)
+        } else if let feature = usage.codingUsage {
+            featureUsageContent(feature)
         } else if let total = usage.totalQuota {
             quotaRow(quota: total)
         } else {
             notSignedInPlaceholder
+        }
+    }
+
+    @ViewBuilder
+    private func featureUsageContent(_ feature: FeatureUsage) -> some View {
+        let detail = feature.detail
+        let remainingPercent = max(0, min(1, 1.0 - detail.usedPercent))
+
+        HStack(spacing: 8) {
+            CircularProgressView(percent: remainingPercent, color: barColor(for: remainingPercent))
+                .frame(width: 34, height: 34)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(detail.remaining)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .monospacedDigit()
+
+                Text("\(L.total): \(detail.limit)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+
+            Spacer()
         }
     }
 
