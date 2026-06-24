@@ -8,6 +8,7 @@ struct SubscriptionCard: View {
     let onEdit: () -> Void
     let onDelete: () -> Void
     let onAuthenticate: () -> Void
+    let onStartKimiLogin: () -> Void
     let onRetry: () -> Void
 
     @EnvironmentObject private var languageManager: LanguageManager
@@ -96,11 +97,19 @@ struct SubscriptionCard: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
-            Button(L.login) {
-                onAuthenticate()
+            if config.type == .kimi {
+                Button(L.login) {
+                    onStartKimiLogin()
+                }
+                .font(.caption)
+                .buttonStyle(.borderless)
+            } else {
+                Button(L.login) {
+                    onAuthenticate()
+                }
+                .font(.caption)
+                .buttonStyle(.borderless)
             }
-            .font(.caption)
-            .buttonStyle(.borderless)
         }
         .frame(height: 40)
     }

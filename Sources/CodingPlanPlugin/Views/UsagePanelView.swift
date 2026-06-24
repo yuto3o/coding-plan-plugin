@@ -148,6 +148,10 @@ struct UsagePanelView: View {
             onAuthenticate: { config in
                 authenticatingConfig = config
             },
+            onStartKimiLogin: { config in
+                loginTask?.cancel()
+                loginTask = Task { await startKimiLogin(providerID: config.id) }
+            },
             onRetry: { config in
                 Task {
                     await manager.refreshSnapshot(for: config.id)

@@ -7,6 +7,7 @@ struct SubscriptionCardList: View {
 
     let onEdit: (ProviderConfiguration) -> Void
     let onAuthenticate: (ProviderConfiguration) -> Void
+    let onStartKimiLogin: (ProviderConfiguration) -> Void
     let onRetry: (ProviderConfiguration) -> Void
 
     private var L: LocalizedStrings { languageManager.current.strings }
@@ -44,6 +45,9 @@ struct SubscriptionCardList: View {
                     },
                     onAuthenticate: {
                         onAuthenticate(config)
+                    },
+                    onStartKimiLogin: {
+                        onStartKimiLogin(config)
                     },
                     onRetry: {
                         onRetry(config)
