@@ -1,11 +1,28 @@
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+
+# Swift Package Manager
 /.build
 /Packages
+*.xcodeproj
+*.xcworkspace
+.swiftpm/
+.netrc
+
+# Xcode
 xcuserdata/
 DerivedData/
-.swiftpm/configuration/registries.json
-.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
-.netrc
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Release artifacts
+/release/
+
+# Editor / Tooling
 .playwright-mcp/
 .superpowers/
-/release/
+.vscode/
+.idea/

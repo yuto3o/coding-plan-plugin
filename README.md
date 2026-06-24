@@ -1,123 +1,131 @@
 # Coding Plan Plugin for macOS
 
-常驻 macOS 右上角菜单栏的 Coding Plan 用量小插件。
+[![macOS](https://img.shields.io/badge/macOS-13%2B-blue)](https://www.apple.com/macos)
+[![Swift](https://img.shields.io/badge/Swift-6-orange)](https://swift.org)
+[![SwiftUI](https://img.shields.io/badge/SwiftUI-black)](https://developer.apple.com/xcode/swiftui/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-## 功能
+一个轻量的 macOS 菜单栏插件，常驻屏幕右上角，帮助你一目了然地查看 **Kimi Code** 与各类 **New API** 平台的用量配额。
 
-- 点击菜单栏图标弹出用量面板
-- 支持多种 Coding Plan Provider：
-  - **Kimi Code**（套餐型）
-  - **cctq.ai**（New API / 充值型）
-  - **ikuncode.cc**（New API / 充值型）
-- 展示：
-  - 账户余额或套餐配额（进度条 / 已用 / 总量 / 剩余）
-  - 本周 / 本月（自然月）使用额度与 Token 数量
-  - 按模型拆分用量明细
-  - 频限明细（Kimi 5 小时窗口）
-  - 最后更新时间
-- 每 5 分钟自动刷新
-- token 过期时自动刷新并重试（Kimi / New API）
-- 网络抖动时自动重试 3 次
-- 菜单栏图标旁显示用量预警（>50% 显示百分比，>90% 显示 ⚠️）
-- 一键打开对应 Provider 控制台
-- 订阅管理：添加、编辑、删除、恢复默认
-- 退出插件按钮
+![Main Panel](./docs/screenshot-main.png)
 
-## 技术栈
+## 功能特性
 
-- Swift 6 + SwiftUI
-- `MenuBarExtra`（macOS 13+）
-- Kimi Code OAuth device-code flow（默认浏览器授权）
-- Keychain 安全存储 Kimi / New API token
-- `/coding/v1/usages` 用量接口（Kimi）
-- New API（one-api / new-api）通用适配
+- 🖥️ 常驻 macOS 菜单栏，点击图标展开用量面板
+- 🔐 所有登录凭证安全存储在系统 Keychain
+- 📊 支持多订阅卡片，拖拽排序
+- 🔔 菜单栏图标旁实时显示用量预警（>50% 显示百分比，>90% 显示 ⚠️）
+- 🔄 手动刷新 + 每 5 分钟自动刷新已有快照
+- 🌐 一键打开对应 Provider 控制台
+- 🌍 中 / 英双语界面
+
+## 支持的订阅类型
+
+### Kimi Code
+
+通过 OAuth device-code flow 在浏览器中授权，插件独立管理 token，无需手动复制 access token。
+
+### New API
+
+支持所有基于 [one-api](https://github.com/songquanpeng/one-api) / [new-api](https://github.com/Calcium-Ion/new-api) 的平台，例如：
+
+- `https://www.cctq.ai`
+- `https://api.ikuncode.cc`
+- 任何其他自定义 Base URL 的平台
+
+每个 New API 订阅需要：
+
+- **Base URL**：控制台域名，如 `https://www.cctq.ai`
+- **access token**：在控制台「令牌」或「个人设置」中生成
+- **user ID**：控制台中显示的用户 ID（通常为纯数字）
+- **控制台路径**（可选）：默认为 `/console`
+
+## 安装
+
+1. 下载最新 Release：`CodingPlanPlugin-v1.0.dmg`
+2. 打开 DMG，将 `CodingPlanPlugin.app` 拖到 **Applications** 文件夹
+3. 从 Applications 启动应用
+4. 点击屏幕右上角菜单栏中的 ![](docs/menu-icon.png) 图标开始使用
+
+> 首次启动可能需要到 **系统设置 → 隐私与安全性** 中允许打开。
+
+## 使用说明
+
+### 添加订阅
+
+点击面板左上角的 `+` 按钮，选择类型：
+
+- **Kimi Code**：直接保存，后续点击卡片上的「登录」完成浏览器授权
+- **New API**：填写显示名称、Base URL、控制台路径后保存
+
+![Add Subscription](./docs/screenshot-add.png)
+
+### 登录 New API
+
+对于 New API 卡片，点击「登录」按钮，在弹窗中粘贴：
+
+- `access token`
+- `user ID`
+
+然后点击「登录」，插件会自动获取最新用量。
+
+![New API Login](./docs/screenshot-login.png)
+
+### 管理订阅
+
+- 点击卡片可选中
+- 点击卡片右上角的 ✏️ 编辑订阅信息
+- 点击卡片右上角的 🗑️ 直接删除订阅并清理对应 Keychain 凭证
+- 拖拽卡片可调整顺序
+
+### 刷新数据
+
+- 点击面板底部 ↻ 刷新按钮手动刷新所有卡片
+- 面板首次显示时，会自动刷新尚未获取过用量快照的卡片
+
+## 开发构建
+
+```bash
+git clone https://github.com/yangyu/coding-plan-plugin-for-macos.git
+cd coding-plan-plugin-for-macos
+swift build
+swift run
+```
+
+> 要求：macOS 13+，Xcode 16 / Swift 6.3
 
 ## 项目结构
 
 ```
 Sources/CodingPlanPlugin/
 ├── CodingPlanPluginApp.swift        # @main MenuBarExtra 入口
-├── Models/
-│   └── PlanUsage.swift              # 统一用量模型（套餐型 + 充值型）
-├── Providers/
-│   ├── Provider.swift               # Provider 协议
-│   ├── ProviderManager.swift        # 订阅配置管理
-│   ├── KimiProvider.swift           # Kimi 实现
-│   ├── NewAPIProvider.swift         # New API 可复用基类
-│   ├── CCTQProvider.swift           # cctq.ai
-│   └── IkunCodeProvider.swift       # ikuncode.cc
-├── Network/
-│   ├── KimiAPIClient.swift          # /coding/v1/usages 请求
-│   └── NewAPIClient.swift           # /api/user/self + /api/user/dashboard
-├── Services/
-│   ├── KimiCodeAuthService.swift    # Kimi Code OAuth 登录态 / device-code flow
-│   ├── NewAPIAuthService.swift      # New API token 存取
-│   ├── KeychainStorage.swift        # Keychain 存取
-│   └── ProviderConfiguration.swift  # 订阅配置持久化
-└── Views/
-    ├── UsagePanelView.swift         # 用量面板 UI
-    ├── ProviderSettingsView.swift   # 订阅管理 UI
-    └── DeviceLoginView.swift        # Kimi device-code 登录视图
+├── Models/                          # 数据模型
+├── Providers/                       # Provider 协议与实现
+│   ├── KimiProvider.swift
+│   └── NewAPIProvider.swift
+├── Network/                         # API 客户端
+│   ├── KimiAPIClient.swift
+│   └── NewAPIClient.swift
+├── Services/                        # 认证、Keychain、配置管理
+│   ├── KimiCodeAuthService.swift
+│   ├── NewAPIAuthService.swift
+│   ├── KeychainStorage.swift
+│   └── ProviderManager.swift
+└── Views/                           # SwiftUI 视图
+    ├── UsagePanelView.swift
+    ├── ProviderEditView.swift
+    ├── SubscriptionCard.swift
+    ├── SubscriptionCardList.swift
+    └── DeviceLoginView.swift
 ```
 
-## 构建
+## 安全说明
 
-```bash
-swift build
-```
+- 所有凭证统一存储在 macOS Keychain，service 为 `com.yangyu.CodingPlanPlugin`
+- 首次启动时会自动将旧版独立 Keychain item 迁移到统一格式并删除旧项
+- 网络日志仅记录 URL 与响应预览，**不会**打印 `Authorization`、`New-Api-User` 或 token 内容
+- 不收集任何用户数据，所有 API 请求均直连对应服务商
 
-## 运行
+## 许可证
 
-```bash
-swift run
-```
-
-首次运行点击菜单栏图标后：
-
-- **Kimi**：点击「登录」会打开默认浏览器进入 Kimi Code OAuth device-code flow，授权成功后即可展示用量。插件独立管理 token，与 Kimi Code CLI 互不干扰。
-- **New API 平台（cctq.ai / ikuncode.cc）**：在控制台生成 access token 后，点击「管理订阅」→「添加订阅」，粘贴 token 即可。
-
-> 注意：当前为 Swift Package 可执行目标，直接 `swift run` 会以进程方式启动菜单栏插件。后续 Phase 5 会打包为正式 `.app`。
-
-## 认证说明
-
-### Kimi
-
-插件使用 **Kimi Code OAuth** 方式获取用量，且**独立管理 token**，与 Kimi Code CLI 解耦：
-
-- Kimi OAuth token 存储在插件自己的 Keychain item 中（account: `kimi-code.oauth_token`）。
-- 若未登录，插件内实现 device-code flow：
-  1. 请求 `https://auth.kimi.com/api/oauth/device_authorization`
-  2. 打开默认浏览器到返回的 `verification_uri_complete`
-  3. 用户确认授权后，轮询 `https://auth.kimi.com/api/oauth/token`
-  4. 获取 `access_token` / `refresh_token` 并保存到 Keychain
-- token 过期时用 `grant_type=refresh_token` 自动刷新。
-- 用量接口为 `GET https://api.kimi.com/coding/v1/usages`，使用 OAuth `access_token` 即可返回套餐与频限数据。
-
-> 插件不会读取或写入 `~/.kimi/credentials/kimi-code.json`。如果你已在 Kimi Code CLI 登录，仍需要在插件内重新授权一次（后续可考虑添加手动「从 CLI 导入」按钮）。
-
-### New API 平台（cctq.ai / ikuncode.cc）
-
-这两个平台均基于 [one-api](https://github.com/songquanpeng/one-api) / [new-api](https://github.com/Calcium-Ion/new-api) 前端框架，接口复用：
-
-- 用户登录控制台后，在「令牌」或「个人设置」中生成 access token
-- 插件将该 token 存入 Keychain（account: `newapi.<host>.access_token`）
-- 调用 `/api/user/self` 获取余额与总用量
-- 调用 `/api/user/dashboard` 获取近 7 天按模型聚合的用量，再汇总为本周 / 本月数据
-
-## 订阅管理
-
-
-
-点击面板底部的「管理订阅」进入设置界面，可以：
-
-- 切换当前 Provider
-- 添加新的 New API 订阅（名称、Host、Token）
-- 编辑或删除已有订阅
-- 恢复默认订阅配置
-
-默认订阅包含：Kimi、cctq.ai、ikuncode.cc。
-
-## 阶段
-
-见 [`handoff.md`](handoff.md)。
+[MIT](./LICENSE)
