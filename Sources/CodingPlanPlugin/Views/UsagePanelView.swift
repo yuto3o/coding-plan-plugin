@@ -166,73 +166,6 @@ struct UsagePanelView: View {
     }
 
     @ViewBuilder
-    private func errorPlaceholder(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(L.fetchFailed, systemImage: "exclamationmark.triangle")
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundStyle(.red)
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(nil)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 8)
-    }
-
-    @ViewBuilder
-    private func loginPlaceholder(provider: any Provider) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "person.crop.circle.badge.exclamationmark")
-                .font(.system(size: 32))
-                .foregroundStyle(.secondary)
-                .padding(.bottom, 4)
-
-            if let config = manager.currentConfiguration {
-                if config.type == .newAPI {
-                    VStack(spacing: 12) {
-                        SecureField(L.pasteAccessToken, text: $accessTokenInput)
-                            .textFieldStyle(.roundedBorder)
-
-                        TextField(L.userID, text: $userIDInput)
-                            .textFieldStyle(.roundedBorder)
-                    }
-
-                    Button(L.saveAndRefresh) {
-                        let token = accessTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let userID = userIDInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !token.isEmpty, !userID.isEmpty else { return }
-                        provider.saveAccessToken(token, userID: userID)
-                        accessTokenInput = ""
-                        userIDInput = ""
-                        Task { await refresh() }
-                    }
-                    .disabled(
-                        accessTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || userIDInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    )
-                    .padding(.top, 4)
-                } else {
-                    Text(L.kimLoginHint)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-
-                    Button(L.login) {
-                        let providerID = manager.selectedID ?? "kimi"
-                        loginTask?.cancel()
-                        loginTask = Task { await startKimiLogin(providerID: providerID) }
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 120)
-        .padding(.bottom, 20)
-    }
-
-    @ViewBuilder
     private var emptyPlaceholder: some View {
         VStack(spacing: 10) {
             Image(systemName: "chart.bar")
@@ -399,7 +332,6 @@ struct UsagePanelView: View {
                 appState.lastError = error
             }
             await manager.refreshSnapshot(for: providerID)
-            syncAppState()
         }
     }
 }
