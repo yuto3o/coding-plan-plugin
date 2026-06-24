@@ -59,6 +59,9 @@ struct LocalizedStrings {
     var resetDefaults: String { localize(zh: "恢复默认", en: "Reset Defaults") }
     var addSubscriptionTitle: String { localize(zh: "添加订阅", en: "Add Subscription") }
     var editSubscriptionTitle: String { localize(zh: "编辑订阅", en: "Edit Subscription") }
+    var deleteSubscriptionTitle: String { localize(zh: "删除订阅", en: "Delete Subscription") }
+    var deleteSubscriptionMessage: String { localize(zh: "确定要删除这条订阅吗？此操作无法撤销。", en: "Are you sure you want to delete this subscription? This action cannot be undone.") }
+    var delete: String { localize(zh: "删除", en: "Delete") }
     var displayName: String { localize(zh: "显示名称", en: "Display Name") }
     var type: String { localize(zh: "类型", en: "Type") }
     var baseURLPlaceholder: String {
