@@ -8,6 +8,7 @@ final class ProviderManager: ObservableObject {
 
     @Published private(set) var configurations: [ProviderConfiguration]
     @Published var selectedID: String?
+    @Published var usageSnapshots: [String: ProviderUsageSnapshot] = [:]
 
     private init() {
         self.configurations = Self.loadConfigurations()
@@ -58,6 +59,7 @@ final class ProviderManager: ObservableObject {
         if let config {
             clearToken(for: config)
         }
+        usageSnapshots.removeValue(forKey: id)
         save()
     }
 
@@ -91,6 +93,62 @@ final class ProviderManager: ObservableObject {
             let credentialsAccount = "newapi.\(host).credentials"
             try? KeychainStorage.shared.delete(account: credentialsAccount)
         }
+    }
+
+    // MARK: - Usage snapshots
+
+    func refreshSnapshot(for id: String) async {
+        guard let config = configurations.first(where: { $0.id == id }),
+              let provider = Self.makeProvider(from: config) else {
+            return
+        }
+
+        await MainActor.run {
+            usageSnapshots[id] = ProviderUsageSnapshot(
+                usage: usageSnapshots[id]?.usage,
+                isLoading: true,
+                error: nil,
+                updatedAt: usageSnapshots[id]?.updatedAt
+            )
+        }
+
+        do {
+            let usage = try await provider.fetchUsage()
+            await MainActor.run {
+                usageSnapshots[id] = ProviderUsageSnapshot(
+                    usage: usage,
+                    isLoading: false,
+                    error: nil,
+                    updatedAt: Date()
+                )
+            }
+        } catch {
+            await MainActor.run {
+                usageSnapshots[id] = ProviderUsageSnapshot(
+                    usage: usageSnapshots[id]?.usage,
+                    isLoading: false,
+                    error: error as? ProviderError ?? .unknown,
+                    updatedAt: usageSnapshots[id]?.updatedAt
+                )
+            }
+        }
+    }
+
+    func refreshAllSnapshots() async {
+        await withTaskGroup(of: Void.self) { group in
+            for config in configurations {
+                group.addTask {
+                    await self.refreshSnapshot(for: config.id)
+                }
+            }
+        }
+    }
+
+    func move(from source: IndexSet, to destination: Int) {
+        var configs = configurations
+        configs.move(fromOffsets: source, toOffset: destination)
+        configurations = configs
+        save()
     }
 
     // MARK: - Private
