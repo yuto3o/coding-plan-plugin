@@ -6,10 +6,10 @@ struct UsagePanelView: View {
     @EnvironmentObject private var languageManager: LanguageManager
 
     @State private var isLoading = false
-    @State private var errorMessage: String?
     @State private var showSettings = false
     @State private var showAddSheet = false
     @State private var editingConfig: ProviderConfiguration? = nil
+    @State private var authenticatingConfig: ProviderConfiguration? = nil
     @State private var deviceAuth: DeviceAuthorization?
     @State private var loginTask: Task<Void, Never>?
     @State private var accessTokenInput = ""
@@ -26,10 +26,6 @@ struct UsagePanelView: View {
             Group {
                 if isLoading && manager.configurations.isEmpty {
                     loadingPlaceholder
-                } else if let errorMessage {
-                    errorPlaceholder(errorMessage)
-                } else if let provider = manager.currentProvider, !provider.isAuthenticated {
-                    loginPlaceholder(provider: provider)
                 } else if manager.configurations.isEmpty {
                     emptyPlaceholder
                 } else {
@@ -76,6 +72,9 @@ struct UsagePanelView: View {
             }
             .frame(minWidth: 400, minHeight: 260)
             .environmentObject(languageManager)
+        }
+        .sheet(item: $authenticatingConfig) { config in
+            authenticationSheet(for: config)
         }
         .sheet(item: $deviceAuth) { auth in
             DeviceLoginView(
@@ -142,9 +141,14 @@ struct UsagePanelView: View {
 
     @ViewBuilder
     private var cardListView: some View {
-        SubscriptionCardList { config in
-            editingConfig = config
-        }
+        SubscriptionCardList(
+            onEdit: { config in
+                editingConfig = config
+            },
+            onAuthenticate: { config in
+                authenticatingConfig = config
+            }
+        )
         .environmentObject(manager)
     }
 
@@ -258,9 +262,11 @@ struct UsagePanelView: View {
             if let provider = manager.currentProvider, provider.isAuthenticated {
                 Button {
                     provider.clearAuthentication()
-                    errorMessage = nil
                     if let configID = manager.currentConfiguration?.id {
-                        Task { await manager.refreshSnapshot(for: configID) }
+                        Task {
+                            await manager.refreshSnapshot(for: configID)
+                            syncAppState()
+                        }
                     }
                 } label: {
                     Label(L.logout, systemImage: "person.crop.circle.badge.xmark")
@@ -287,10 +293,73 @@ struct UsagePanelView: View {
 
     // MARK: - Actions
 
+    @ViewBuilder
+    private func authenticationSheet(for config: ProviderConfiguration) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(config.name)
+                .font(.headline)
+
+            if config.type == .newAPI {
+                VStack(spacing: 12) {
+                    SecureField(L.pasteAccessToken, text: $accessTokenInput)
+                        .textFieldStyle(.roundedBorder)
+
+                    TextField(L.userID, text: $userIDInput)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                HStack {
+                    Button(L.cancel) {
+                        authenticatingConfig = nil
+                        accessTokenInput = ""
+                        userIDInput = ""
+                    }
+                    Spacer()
+                    Button(L.saveAndRefresh) {
+                        let token = accessTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let userID = userIDInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !token.isEmpty, !userID.isEmpty,
+                              let provider = manager.provider(for: config.id) else { return }
+                        provider.saveAccessToken(token, userID: userID)
+                        accessTokenInput = ""
+                        userIDInput = ""
+                        authenticatingConfig = nil
+                        Task {
+                            await manager.refreshSnapshot(for: config.id)
+                            syncAppState()
+                        }
+                    }
+                    .disabled(
+                        accessTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || userIDInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    )
+                }
+            } else {
+                Text(L.kimLoginHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+
+                HStack {
+                    Button(L.cancel) {
+                        authenticatingConfig = nil
+                    }
+                    Spacer()
+                    Button(L.login) {
+                        authenticatingConfig = nil
+                        loginTask?.cancel()
+                        loginTask = Task { await startKimiLogin(providerID: config.id) }
+                    }
+                }
+            }
+        }
+        .padding()
+        .frame(minWidth: 360)
+    }
+
     private func refresh() async {
         guard !isLoading else { return }
         isLoading = true
-        errorMessage = nil
         defer { isLoading = false }
         await manager.refreshAllSnapshots()
         syncAppState()
@@ -327,7 +396,6 @@ struct UsagePanelView: View {
             await MainActor.run {
                 deviceAuth = nil
                 loginTask = nil
-                errorMessage = error.description
             }
         }
     }

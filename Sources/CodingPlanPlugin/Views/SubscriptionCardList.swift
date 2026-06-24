@@ -6,6 +6,7 @@ struct SubscriptionCardList: View {
     @State private var configToDelete: ProviderConfiguration? = nil
 
     let onEdit: (ProviderConfiguration) -> Void
+    let onAuthenticate: (ProviderConfiguration) -> Void
 
     private var L: LocalizedStrings { languageManager.current.strings }
 
@@ -39,6 +40,9 @@ struct SubscriptionCardList: View {
                     },
                     onDelete: {
                         configToDelete = config
+                    },
+                    onAuthenticate: {
+                        onAuthenticate(config)
                     },
                     onRetry: {
                         Task {

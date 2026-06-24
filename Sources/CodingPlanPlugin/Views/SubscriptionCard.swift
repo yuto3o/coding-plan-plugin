@@ -7,6 +7,7 @@ struct SubscriptionCard: View {
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
+    let onAuthenticate: () -> Void
     let onRetry: () -> Void
 
     @EnvironmentObject private var languageManager: LanguageManager
@@ -100,7 +101,7 @@ struct SubscriptionCard: View {
                 .foregroundStyle(.secondary)
             Spacer()
             Button(L.login) {
-                onEdit()
+                onAuthenticate()
             }
             .font(.caption)
             .buttonStyle(.borderless)
