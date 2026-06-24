@@ -47,7 +47,7 @@ struct UsagePanelView: View {
         }
         .onReceive(timer) { _ in
             Task {
-                await manager.refreshAllSnapshots()
+                await manager.refreshExistingSnapshots()
             }
         }
         .sheet(isPresented: $showSettings) {
@@ -293,6 +293,18 @@ struct UsagePanelView: View {
         errorMessage = nil
         defer { isLoading = false }
         await manager.refreshAllSnapshots()
+        syncAppState()
+    }
+
+    private func syncAppState() {
+        guard let configID = manager.currentConfiguration?.id,
+              let snapshot = manager.usageSnapshots[configID] else {
+            appState.lastUsage = nil
+            appState.lastError = nil
+            return
+        }
+        appState.lastUsage = snapshot.usage
+        appState.lastError = snapshot.error
     }
 
     private func startKimiLogin(providerID: String) async {

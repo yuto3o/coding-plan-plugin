@@ -99,6 +99,11 @@ struct SubscriptionCard: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
+            Button(L.login) {
+                onEdit()
+            }
+            .font(.caption)
+            .buttonStyle(.borderless)
         }
         .frame(height: 40)
     }
@@ -225,12 +230,21 @@ struct SubscriptionCard: View {
     private func formatQuota(_ value: Int64) -> String {
         let doubleValue = Double(value)
         let absValue = abs(doubleValue)
+
         if absValue >= 1_000_000 {
-            return String(format: "%.1fM", doubleValue / 1_000_000)
+            return formatCompact(doubleValue / 1_000_000, suffix: "M")
         } else if absValue >= 1_000 {
-            return String(format: "%.1fK", doubleValue / 1_000)
+            return formatCompact(doubleValue / 1_000, suffix: "K")
         } else {
             return String(value)
+        }
+    }
+
+    private func formatCompact(_ value: Double, suffix: String) -> String {
+        if value == floor(value) {
+            return String(format: "%.0f%@", value, suffix)
+        } else {
+            return String(format: "%.1f%@", value, suffix)
         }
     }
 }

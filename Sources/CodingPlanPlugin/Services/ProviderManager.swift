@@ -66,6 +66,7 @@ final class ProviderManager: ObservableObject {
     func resetToDefaults() {
         configurations = ProviderConfiguration.defaults
         selectedID = configurations.first?.id
+        usageSnapshots.removeAll()
         save()
     }
 
@@ -103,34 +104,31 @@ final class ProviderManager: ObservableObject {
             return
         }
 
-        await MainActor.run {
-            usageSnapshots[id] = ProviderUsageSnapshot(
-                usage: usageSnapshots[id]?.usage,
-                isLoading: true,
-                error: nil,
-                updatedAt: usageSnapshots[id]?.updatedAt
-            )
-        }
+        usageSnapshots[id] = ProviderUsageSnapshot(
+            usage: usageSnapshots[id]?.usage,
+            isLoading: true,
+            error: nil,
+            updatedAt: usageSnapshots[id]?.updatedAt
+        )
 
         do {
             let usage = try await provider.fetchUsage()
-            await MainActor.run {
-                usageSnapshots[id] = ProviderUsageSnapshot(
-                    usage: usage,
-                    isLoading: false,
-                    error: nil,
-                    updatedAt: Date()
-                )
-            }
+            usageSnapshots[id] = ProviderUsageSnapshot(
+                usage: usage,
+                isLoading: false,
+                error: nil,
+                updatedAt: Date()
+            )
         } catch {
-            await MainActor.run {
-                usageSnapshots[id] = ProviderUsageSnapshot(
-                    usage: usageSnapshots[id]?.usage,
-                    isLoading: false,
-                    error: error as? ProviderError ?? .unknown,
-                    updatedAt: usageSnapshots[id]?.updatedAt
-                )
+            if case .notAuthenticated = error {
+                provider.clearAuthentication()
             }
+            usageSnapshots[id] = ProviderUsageSnapshot(
+                usage: usageSnapshots[id]?.usage,
+                isLoading: false,
+                error: error,
+                updatedAt: usageSnapshots[id]?.updatedAt
+            )
         }
     }
 
@@ -139,6 +137,17 @@ final class ProviderManager: ObservableObject {
             for config in configurations {
                 group.addTask {
                     await self.refreshSnapshot(for: config.id)
+                }
+            }
+        }
+    }
+
+    func refreshExistingSnapshots() async {
+        let existingIDs = Array(usageSnapshots.keys)
+        await withTaskGroup(of: Void.self) { group in
+            for id in existingIDs {
+                group.addTask {
+                    await self.refreshSnapshot(for: id)
                 }
             }
         }
