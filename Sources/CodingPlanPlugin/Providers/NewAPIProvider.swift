@@ -25,7 +25,10 @@ struct NewAPIProvider: Provider {
     }
 
     func fetchUsage() async throws(ProviderError) -> PlanUsage {
-        try await api.fetchUsage()
+        let state = auth.incrementalState
+        let (usage, newState) = try await api.fetchUsage(incrementalState: state)
+        auth.incrementalState = newState
+        return usage
     }
 
     func saveAccessToken(_ token: String, userID: String?) {

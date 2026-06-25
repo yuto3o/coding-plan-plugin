@@ -251,8 +251,31 @@ struct UnifiedCredentials: Codable, Sendable {
 struct NewAPICredentials: Codable, Sendable {
     var token: String = ""
     var userID: String = ""
+    var incrementalState: NewAPIIncrementalState?
 
     var isValid: Bool {
         !token.isEmpty && !userID.isEmpty
     }
+}
+
+/// New API 用量刷新的增量状态。
+///
+/// 避免每次刷新都拉取整月/整周的日志明细：只从上一次 `lastFetchAt` 之后拉取新增记录，
+/// 累加到已有统计中。当月/周切换时自动重置对应周期累计。
+struct NewAPIIncrementalState: Codable, Sendable {
+    /// 上次成功拉取日志的最后一条记录时间戳（UTC 秒）。
+    var lastFetchAt: TimeInterval?
+
+    /// 当前月度累计周期的起点（UTC 秒）。
+    var monthlyPeriodStart: TimeInterval?
+    /// 月度累计用量。
+    var monthlyUsed: Int64 = 0
+
+    /// 当前周累计周期的起点（UTC 秒）。
+    var weeklyPeriodStart: TimeInterval?
+    /// 周累计用量。
+    var weeklyUsed: Int64 = 0
+
+    /// 按模型累计的用量（本周）。
+    var weeklyModelUsage: [String: Int64] = [:]
 }

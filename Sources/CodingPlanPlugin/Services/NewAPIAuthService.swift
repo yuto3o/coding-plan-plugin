@@ -14,6 +14,7 @@ actor NewAPIAuthService {
     /// 内存缓存，避免频繁读取 Keychain。
     nonisolated(unsafe) private var cachedToken: String?
     nonisolated(unsafe) private var cachedUserID: String?
+    nonisolated(unsafe) private var cachedIncrementalState: NewAPIIncrementalState?
     nonisolated(unsafe) private var didLoad = false
     /// 保证多个并发调用者不会同时去读取 Keychain，避免重复弹窗。
     nonisolated(unsafe) private var loadLock = NSLock()
@@ -73,9 +74,22 @@ actor NewAPIAuthService {
         accessToken != nil && userID != nil
     }
 
+    nonisolated var incrementalState: NewAPIIncrementalState? {
+        get {
+            ensureLoaded()
+            return cachedIncrementalState
+        }
+        set {
+            cachedIncrementalState = newValue
+            didLoad = true
+            syncIncrementalStateToKeychain()
+        }
+    }
+
     nonisolated func clear() {
         cachedToken = nil
         cachedUserID = nil
+        cachedIncrementalState = nil
         didLoad = true
         KeychainStorage.shared.removeNewAPICredentials(for: baseURL)
     }
@@ -96,6 +110,7 @@ actor NewAPIAuthService {
         let credentials = KeychainStorage.shared.newAPICredentials(for: baseURL)
         cachedToken = credentials?.token
         cachedUserID = credentials?.userID
+        cachedIncrementalState = credentials?.incrementalState
         didLoad = true
     }
 
@@ -109,6 +124,21 @@ actor NewAPIAuthService {
         var credentials = KeychainStorage.shared.newAPICredentials(for: baseURL) ?? NewAPICredentials()
         credentials.token = token
         credentials.userID = userID
+        if let cachedIncrementalState {
+            credentials.incrementalState = cachedIncrementalState
+        }
+        KeychainStorage.shared.setNewAPICredentials(credentials, for: baseURL)
+    }
+
+    private nonisolated func syncIncrementalStateToKeychain() {
+        guard let token = cachedToken, !token.isEmpty,
+              let userID = cachedUserID, !userID.isEmpty else {
+            return
+        }
+        var credentials = KeychainStorage.shared.newAPICredentials(for: baseURL) ?? NewAPICredentials()
+        credentials.token = token
+        credentials.userID = userID
+        credentials.incrementalState = cachedIncrementalState
         KeychainStorage.shared.setNewAPICredentials(credentials, for: baseURL)
     }
 }

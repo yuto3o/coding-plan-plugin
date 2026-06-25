@@ -139,7 +139,7 @@ actor NewAPIClient {
 
     // MARK: - API
 
-    func fetchUsage() async throws(ProviderError) -> PlanUsage {
+    func fetchUsage(incrementalState: NewAPIIncrementalState?) async throws(ProviderError) -> (PlanUsage, NewAPIIncrementalState) {
         guard let token = auth.accessToken, let userID = auth.userID else {
             throw .notAuthenticated
         }
@@ -152,18 +152,16 @@ actor NewAPIClient {
             throw .unknown
         }
 
-        // /api/data/self 有延迟，可能缺少最近几天的数据；
-        // /api/log/self 是实时消费日志。两者都拿，分别用于本月/本周聚合。
-        let quotaDataResult = await fetchQuotaData(token: token, userID: userID)
-        let quotaItems: [QuotaDataResponse.QuotaDataItem]
-        switch quotaDataResult {
-        case .success(let items):
-            quotaItems = items
-        case .failure:
-            quotaItems = []
-        }
+        // 增量更新：只从上一次成功拉取的时间点之后获取新日志，
+        // 避免每次刷新都遍历整月/整周的日志分页。
+        let (startTimestamp, endTimestamp, isIncremental) = logFetchRange(incrementalState: incrementalState)
 
-        let logResult = await fetchUserLogs(token: token, userID: userID)
+        let logResult = await fetchUserLogs(
+            token: token,
+            userID: userID,
+            startTimestamp: startTimestamp,
+            endTimestamp: endTimestamp
+        )
         let logItems: [LogResponse.LogItem]
         switch logResult {
         case .success(let items):
@@ -181,12 +179,35 @@ actor NewAPIClient {
             tokens = []
         }
 
+        Self.logger.info("NewAPIClient Data sources: isIncremental=\(isIncremental, privacy: .public), newLogItems=\(logItems.count, privacy: .public)")
+
         return buildPlanUsage(
             user: user,
-            quotaItems: quotaItems,
             logItems: logItems,
-            tokens: tokens
+            tokens: tokens,
+            incrementalState: incrementalState
         )
+    }
+
+    private func logFetchRange(incrementalState: NewAPIIncrementalState?) -> (start: Int64, end: Int64, isIncremental: Bool) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let now = Date()
+        let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
+        let nextMonthStart = calendar.date(byAdding: .month, value: 1, to: monthStart)!
+
+        let monthStartTS = monthStart.timeIntervalSince1970
+        let nextMonthStartTS = Int64(nextMonthStart.timeIntervalSince1970)
+
+        guard let state = incrementalState,
+              state.monthlyPeriodStart == monthStartTS,
+              let lastFetchAt = state.lastFetchAt else {
+            return (Int64(monthStartTS), nextMonthStartTS, false)
+        }
+
+        // 增量：从上次最后一条记录的下一秒开始，避免重复统计。
+        let incrementalStart = Int64(lastFetchAt) + 1
+        return (incrementalStart, nextMonthStartTS, true)
     }
 
     // MARK: - Private
@@ -205,42 +226,7 @@ actor NewAPIClient {
         return .success(user)
     }
 
-    private func fetchQuotaData(token: String, userID: String) async -> Result<[QuotaDataResponse.QuotaDataItem], ProviderError> {
-        // 服务端 quota_data.created_at 以 UTC 存储，因此时间范围也用 UTC 计算。
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        let now = Date()
-        let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
-        let nextMonthStart = calendar.date(byAdding: .month, value: 1, to: monthStart)!
-
-        let startTimestamp = Int64(monthStart.timeIntervalSince1970)
-        let endTimestamp = Int64(nextMonthStart.timeIntervalSince1970)
-
-        let path = "/api/data/self?start_timestamp=\(startTimestamp)&end_timestamp=\(endTimestamp)"
-        let result: QuotaDataResponse
-        do {
-            result = try await request(path: path, method: "GET", token: token, userID: userID)
-        } catch {
-            return .failure(error)
-        }
-
-        guard result.success == true else {
-            return .failure(.api(code: "api_error", message: result.message ?? "获取用量统计失败"))
-        }
-        return .success(result.data ?? [])
-    }
-
-    private func fetchUserLogs(token: String, userID: String) async -> Result<[LogResponse.LogItem], ProviderError> {
-        // 服务端 logs.created_at 以 UTC 存储，时间范围用 UTC 计算。
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        let now = Date()
-        let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
-        let nextMonthStart = calendar.date(byAdding: .month, value: 1, to: monthStart)!
-
-        let startTimestamp = Int64(monthStart.timeIntervalSince1970)
-        let endTimestamp = Int64(nextMonthStart.timeIntervalSince1970)
-
+    private func fetchUserLogs(token: String, userID: String, startTimestamp: Int64, endTimestamp: Int64) async -> Result<[LogResponse.LogItem], ProviderError> {
         var allItems: [LogResponse.LogItem] = []
         var page = 1
         let pageSize = 100
@@ -267,7 +253,7 @@ actor NewAPIClient {
             }
             page += 1
 
-            // 安全上限，防止异常循环
+            // 安全上限，防止异常循环；增量模式下通常几页即可结束。
             if page > 50 {
                 break
             }
@@ -377,130 +363,135 @@ actor NewAPIClient {
 
     private func buildPlanUsage(
         user: UserSelfResponse.User,
-        quotaItems: [QuotaDataResponse.QuotaDataItem],
         logItems: [LogResponse.LogItem],
-        tokens: [TokenListResponse.Token]
-    ) -> PlanUsage {
+        tokens: [TokenListResponse.Token],
+        incrementalState: NewAPIIncrementalState?
+    ) -> (PlanUsage, NewAPIIncrementalState) {
         let quota = user.quota ?? 0
         let usedQuota = user.usedQuota ?? 0
         let totalQuota = quota + usedQuota
 
-        // /api/log/self 是实时数据；/api/data/self 有延迟。把日志转成统一格式备用。
-        let logQuotaItems = logItems.map {
-            QuotaDataResponse.QuotaDataItem(
-                createdAt: $0.createdAt,
-                modelName: $0.modelName,
-                quota: $0.quota,
-                tokenUsed: ($0.promptTokens ?? 0) + ($0.completionTokens ?? 0),
-                count: 1
-            )
-        }
-
-        // 按模型聚合（优先使用 /api/data/self 全量数据）
-        var modelMap: [String: ModelUsage] = [:]
-        for item in quotaItems {
-            let modelName = item.modelName ?? "Unknown"
-            let existing = modelMap[modelName]
-            let tokenUsed = item.tokenUsed ?? 0
-            modelMap[modelName] = ModelUsage(
-                modelName: modelName,
-                quotaUsed: (existing?.quotaUsed ?? 0) + (item.quota ?? 0),
-                promptTokens: 0,
-                completionTokens: (existing?.completionTokens ?? 0) + tokenUsed,
-                requestCount: (existing?.requestCount ?? 0) + (item.count ?? 0)
-            )
-        }
-        let allModelUsages = modelMap.values.sorted { $0.quotaUsed > $1.quotaUsed }
-
-        // 服务端 quota_data.created_at / logs.created_at 以 UTC 存储，过滤周期也用 UTC。
+        // 服务端 logs.created_at 以 UTC 存储，周期边界用 UTC 计算。
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC")!
         let now = Date()
 
-        Self.logger.info("NewAPIClient Data sources: quotaItems=\(quotaItems.count, privacy: .public), logItems=\(logItems.count, privacy: .public)")
-
-        // 自然月聚合：使用实时消费日志 /api/log/self
         let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
         let nextMonthStart = calendar.date(byAdding: .month, value: 1, to: monthStart)!
-        let rawMonthly = aggregate(title: "本月用量（自然月）", quotaItems: logQuotaItems, from: monthStart, to: nextMonthStart)
-        let monthlyUsed = rawMonthly.quotaUsed
+        let monthStartTS = monthStart.timeIntervalSince1970
+
+        let weekday = calendar.component(.weekday, from: now)
+        let daysSinceMonday = (weekday + 5) % 7
+        let weekStart = calendar.date(byAdding: .day, value: -daysSinceMonday, to: calendar.startOfDay(for: now))!
+        let nextWeekStart = calendar.date(byAdding: .day, value: 7, to: weekStart)!
+        let weekStartTS = weekStart.timeIntervalSince1970
+
+        // 继承或重置增量累计数据。
+        var monthlyUsed: Int64 = 0
+        var weeklyUsed: Int64 = 0
+        var weeklyModelUsage: [String: Int64] = [:]
+        var lastFetchAt: TimeInterval? = incrementalState?.lastFetchAt
+
+        if let state = incrementalState, state.monthlyPeriodStart == monthStartTS {
+            monthlyUsed = state.monthlyUsed
+        }
+        if let state = incrementalState, state.weeklyPeriodStart == weekStartTS {
+            weeklyUsed = state.weeklyUsed
+            weeklyModelUsage = state.weeklyModelUsage
+        }
+
+        // 累加本次新拉取的日志。
+        for item in logItems {
+            let itemQuota = item.quota ?? 0
+            let itemDate = Date(timeIntervalSince1970: TimeInterval(item.createdAt))
+
+            if itemDate >= monthStart && itemDate < nextMonthStart {
+                monthlyUsed += itemQuota
+            }
+            if itemDate >= weekStart && itemDate < nextWeekStart {
+                weeklyUsed += itemQuota
+                let modelName = item.modelName ?? "Unknown"
+                weeklyModelUsage[modelName, default: 0] += itemQuota
+            }
+
+            let ts = TimeInterval(item.createdAt)
+            if ts > (lastFetchAt ?? 0) {
+                lastFetchAt = ts
+            }
+        }
+
+        // 按模型用量构造 ModelUsage 数组（本周 Top3 + Other）。
+        let sortedModels = weeklyModelUsage
+            .map { ModelUsage(modelName: $0.key, quotaUsed: $0.value, promptTokens: 0, completionTokens: 0, requestCount: 0) }
+            .sorted { $0.quotaUsed > $1.quotaUsed }
+        let top3 = Array(sortedModels.prefix(3))
+        let rest = sortedModels.dropFirst(3)
+        var weeklyModels = top3
+        if !rest.isEmpty {
+            let otherUsage = rest.reduce(0) { $0 + $1.quotaUsed }
+            weeklyModels.append(ModelUsage(modelName: "Other", quotaUsed: otherUsage, promptTokens: 0, completionTokens: 0, requestCount: 0))
+        }
 
         let monthly = UsageBreakdown(
-            title: rawMonthly.title,
+            title: "本月用量（自然月）",
             quotaUsed: monthlyUsed,
             limit: totalQuota,
-            promptTokens: rawMonthly.promptTokens,
-            completionTokens: rawMonthly.completionTokens,
-            requestCount: rawMonthly.requestCount,
-            modelUsages: rawMonthly.modelUsages
+            promptTokens: 0,
+            completionTokens: 0,
+            requestCount: 0,
+            modelUsages: []
         )
 
-        // 余额：保留兼容旧布局
+        let weekly = UsageBreakdown(
+            title: "本周用量",
+            quotaUsed: weeklyUsed,
+            limit: totalQuota,
+            promptTokens: 0,
+            completionTokens: 0,
+            requestCount: 0,
+            modelUsages: weeklyModels
+        )
+
         let balanceQuota = Quota(
             limit: formatQuota(totalQuota),
             used: formatQuota(usedQuota),
             remaining: formatQuota(quota)
         )
 
-        // 本周聚合（自然周，周一为起点）：从自然月日志中过滤
-        let weekday = calendar.component(.weekday, from: now)
-        let daysSinceMonday = (weekday + 5) % 7
-        let weekStart = calendar.date(byAdding: .day, value: -daysSinceMonday, to: calendar.startOfDay(for: now))!
-        let nextWeekStart = calendar.date(byAdding: .day, value: 7, to: weekStart)!
-        let weekly = aggregate(title: "本周用量", quotaItems: logQuotaItems, from: weekStart, to: nextWeekStart)
-        let weeklyTop3 = top3Breakdown(from: weekly)
-
-        Self.logger.info("NewAPIClient Weekly aggregation: sourceCount=\(logQuotaItems.count, privacy: .public), filteredCount=\(weekly.modelUsages.count, privacy: .public), quotaUsed=\(weekly.quotaUsed, privacy: .public)")
-
-        // 累计总用量（保留在 totalUsage 中，便于扩展展示）
+        // 累计总用量仍使用 /api/user/self 返回的 usedQuota，作为账户维度总量。
         let totalUsage = UsageBreakdown(
             title: "累计用量",
             quotaUsed: usedQuota,
             limit: totalQuota,
-            promptTokens: allModelUsages.reduce(0) { $0 + $1.promptTokens },
-            completionTokens: allModelUsages.reduce(0) { $0 + $1.completionTokens },
-            requestCount: allModelUsages.reduce(0) { $0 + $1.requestCount },
-            modelUsages: allModelUsages
+            promptTokens: 0,
+            completionTokens: 0,
+            requestCount: 0,
+            modelUsages: sortedModels
         )
 
-        var periods: [UsageBreakdown] = []
-        periods.append(monthly)
-        if !weeklyTop3.modelUsages.isEmpty || weeklyTop3.quotaUsed > 0 {
-            periods.append(weeklyTop3)
+        var periods: [UsageBreakdown] = [monthly]
+        if !weeklyModels.isEmpty || weeklyUsed > 0 {
+            periods.append(weekly)
         }
 
-        return PlanUsage(
+        let planUsage = PlanUsage(
             providerID: baseURL.host ?? "newapi",
             updatedAt: Date(),
             balance: balanceQuota,
             totalUsage: totalUsage,
             periods: periods
         )
-    }
 
-    private func top3Breakdown(from breakdown: UsageBreakdown) -> UsageBreakdown {
-        let sorted = breakdown.modelUsages.sorted { $0.quotaUsed > $1.quotaUsed }
-        let top3 = Array(sorted.prefix(3))
-        let rest = sorted.dropFirst(3)
-        let other: ModelUsage? = rest.isEmpty ? nil : ModelUsage(
-            modelName: "Other",
-            quotaUsed: rest.reduce(0) { $0 + $1.quotaUsed },
-            promptTokens: 0,
-            completionTokens: 0,
-            requestCount: rest.reduce(0) { $0 + $1.requestCount }
+        let newState = NewAPIIncrementalState(
+            lastFetchAt: lastFetchAt,
+            monthlyPeriodStart: monthStartTS,
+            monthlyUsed: monthlyUsed,
+            weeklyPeriodStart: weekStartTS,
+            weeklyUsed: weeklyUsed,
+            weeklyModelUsage: weeklyModelUsage
         )
-        var models = top3
-        if let other {
-            models.append(other)
-        }
-        return UsageBreakdown(
-            title: breakdown.title,
-            quotaUsed: breakdown.quotaUsed,
-            promptTokens: breakdown.promptTokens,
-            completionTokens: breakdown.completionTokens,
-            requestCount: breakdown.requestCount,
-            modelUsages: models
-        )
+
+        return (planUsage, newState)
     }
 
     private func formatQuota(_ value: Int64) -> String {
@@ -526,41 +517,4 @@ actor NewAPIClient {
         }
     }
 
-    private func aggregate(
-        title: String,
-        quotaItems: [QuotaDataResponse.QuotaDataItem],
-        from: Date,
-        to: Date,
-        limit: Int64? = nil
-    ) -> UsageBreakdown {
-        let filtered = quotaItems.filter {
-            let itemDate = Date(timeIntervalSince1970: TimeInterval($0.createdAt))
-            return itemDate >= from && itemDate < to
-        }
-
-        var modelMap: [String: ModelUsage] = [:]
-        for item in filtered {
-            let modelName = item.modelName ?? "Unknown"
-            let existing = modelMap[modelName]
-            let tokenUsed = item.tokenUsed ?? 0
-            modelMap[modelName] = ModelUsage(
-                modelName: modelName,
-                quotaUsed: (existing?.quotaUsed ?? 0) + (item.quota ?? 0),
-                promptTokens: 0,
-                completionTokens: (existing?.completionTokens ?? 0) + tokenUsed,
-                requestCount: (existing?.requestCount ?? 0) + (item.count ?? 0)
-            )
-        }
-        let models = modelMap.values.sorted { $0.quotaUsed > $1.quotaUsed }
-
-        return UsageBreakdown(
-            title: title,
-            quotaUsed: filtered.reduce(0) { $0 + ($1.quota ?? 0) },
-            limit: limit,
-            promptTokens: 0,
-            completionTokens: filtered.reduce(0) { $0 + ($1.tokenUsed ?? 0) },
-            requestCount: filtered.reduce(0) { $0 + ($1.count ?? 0) },
-            modelUsages: models
-        )
-    }
 }
