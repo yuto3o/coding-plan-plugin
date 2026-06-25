@@ -38,26 +38,18 @@ actor KimiCodeAuthService {
     }
 
     func accessToken() async throws(ProviderError) -> String {
-        if let inMemoryToken, !inMemoryToken.isExpired(withBuffer: 60) {
+        // 使用 lazy 刷新策略：不根据 expires_in 主动刷新，
+        // 而是先拿现有 access_token 去请求，等服务器返回 401 时再 refresh。
+        if let inMemoryToken {
             return inMemoryToken.accessToken
         }
 
-        var token = KeychainStorage.shared.kimiToken()
-        token?.normalize()
-
-        guard let validToken = token else {
+        guard let token = KeychainStorage.shared.kimiToken() else {
             throw .notAuthenticated
         }
 
-        if validToken.isExpired(withBuffer: 60) {
-            let refreshed = try await refreshAccessToken(validToken)
-            KeychainStorage.shared.setKimiToken(refreshed)
-            inMemoryToken = refreshed
-            return refreshed.accessToken
-        }
-
-        inMemoryToken = validToken
-        return validToken.accessToken
+        inMemoryToken = token
+        return token.accessToken
     }
 
     /// 启动 OAuth device-code flow。
@@ -114,8 +106,7 @@ actor KimiCodeAuthService {
 
             if httpResponse.statusCode == 200 {
                 do {
-                    var token = try decoder.decode(OAuthToken.self, from: data)
-                    token.normalize()
+                    let token = try decoder.decode(OAuthToken.self, from: data)
                     KeychainStorage.shared.setKimiToken(token)
                     inMemoryToken = token
                     return token
@@ -187,7 +178,6 @@ actor KimiCodeAuthService {
 
         do {
             var token = try decoder.decode(OAuthToken.self, from: data)
-            token.normalize()
             // 部分服务端刷新时不返回新的 refresh_token，保留旧的以保证后续仍可刷新。
             if token.refreshToken.isEmpty {
                 token.refreshToken = refreshToken.refreshToken
@@ -215,7 +205,7 @@ actor KimiCodeAuthService {
 struct OAuthToken: Codable, Sendable {
     let accessToken: String
     var refreshToken: String
-    var expiresAt: TimeInterval?
+    let expiresAt: TimeInterval?
     let expiresIn: TimeInterval?
     let scope: String?
     let tokenType: String?
@@ -227,18 +217,6 @@ struct OAuthToken: Codable, Sendable {
         case expiresIn = "expires_in"
         case scope
         case tokenType = "token_type"
-    }
-
-    mutating func normalize(issuedAt: TimeInterval = Date().timeIntervalSince1970) {
-        // 服务端有时只返回 expires_in，需要根据签发时间计算 expires_at。
-        if expiresAt == nil, let expiresIn, expiresIn > 0 {
-            expiresAt = issuedAt + expiresIn
-        }
-    }
-
-    func isExpired(withBuffer bufferSeconds: TimeInterval) -> Bool {
-        guard let expiresAt else { return false }
-        return Date().timeIntervalSince1970 + bufferSeconds >= expiresAt
     }
 }
 
