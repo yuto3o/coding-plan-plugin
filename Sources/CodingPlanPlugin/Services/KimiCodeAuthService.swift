@@ -42,19 +42,22 @@ actor KimiCodeAuthService {
             return inMemoryToken.accessToken
         }
 
-        guard let token = KeychainStorage.shared.kimiToken() else {
+        var token = KeychainStorage.shared.kimiToken()
+        token?.normalize()
+
+        guard let validToken = token else {
             throw .notAuthenticated
         }
 
-        if token.isExpired(withBuffer: 60) {
-            let refreshed = try await refreshToken(token)
+        if validToken.isExpired(withBuffer: 60) {
+            let refreshed = try await refreshAccessToken(validToken)
             KeychainStorage.shared.setKimiToken(refreshed)
             inMemoryToken = refreshed
             return refreshed.accessToken
         }
 
-        inMemoryToken = token
-        return token.accessToken
+        inMemoryToken = validToken
+        return validToken.accessToken
     }
 
     /// 启动 OAuth device-code flow。
@@ -111,7 +114,8 @@ actor KimiCodeAuthService {
 
             if httpResponse.statusCode == 200 {
                 do {
-                    let token = try decoder.decode(OAuthToken.self, from: data)
+                    var token = try decoder.decode(OAuthToken.self, from: data)
+                    token.normalize()
                     KeychainStorage.shared.setKimiToken(token)
                     inMemoryToken = token
                     return token
@@ -151,13 +155,13 @@ actor KimiCodeAuthService {
         KeychainStorage.shared.setKimiToken(nil)
     }
 
-    private func refreshToken(_ token: OAuthToken) async throws(ProviderError) -> OAuthToken {
+    private func refreshAccessToken(_ refreshToken: OAuthToken) async throws(ProviderError) -> OAuthToken {
         let url = URL(string: "\(Self.oauthHost)/api/oauth/token")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let body = "client_id=\(Self.clientId)&grant_type=refresh_token&refresh_token=\(token.refreshToken)"
+        let body = "client_id=\(Self.clientId)&grant_type=refresh_token&refresh_token=\(refreshToken.refreshToken)"
         request.httpBody = body.data(using: .utf8)
 
         let data: Data
@@ -182,10 +186,27 @@ actor KimiCodeAuthService {
         }
 
         do {
-            return try decoder.decode(OAuthToken.self, from: data)
+            var token = try decoder.decode(OAuthToken.self, from: data)
+            token.normalize()
+            // 部分服务端刷新时不返回新的 refresh_token，保留旧的以保证后续仍可刷新。
+            if token.refreshToken.isEmpty {
+                token.refreshToken = refreshToken.refreshToken
+            }
+            return token
         } catch {
             throw .decoding(error)
         }
+    }
+
+    /// 强制刷新 access token，用于 API 返回 401 时主动重试一次。
+    func forceRefresh() async throws(ProviderError) -> String {
+        guard let token = KeychainStorage.shared.kimiToken() else {
+            throw .notAuthenticated
+        }
+        let refreshed = try await refreshAccessToken(token)
+        KeychainStorage.shared.setKimiToken(refreshed)
+        inMemoryToken = refreshed
+        return refreshed.accessToken
     }
 }
 
@@ -193,8 +214,8 @@ actor KimiCodeAuthService {
 
 struct OAuthToken: Codable, Sendable {
     let accessToken: String
-    let refreshToken: String
-    let expiresAt: TimeInterval?
+    var refreshToken: String
+    var expiresAt: TimeInterval?
     let expiresIn: TimeInterval?
     let scope: String?
     let tokenType: String?
@@ -206,6 +227,13 @@ struct OAuthToken: Codable, Sendable {
         case expiresIn = "expires_in"
         case scope
         case tokenType = "token_type"
+    }
+
+    mutating func normalize(issuedAt: TimeInterval = Date().timeIntervalSince1970) {
+        // 服务端有时只返回 expires_in，需要根据签发时间计算 expires_at。
+        if expiresAt == nil, let expiresIn, expiresIn > 0 {
+            expiresAt = issuedAt + expiresIn
+        }
     }
 
     func isExpired(withBuffer bufferSeconds: TimeInterval) -> Bool {

@@ -80,13 +80,13 @@ actor KimiAPIClient {
 
         do {
             let token = try await auth.accessToken()
-            return try await performFetch(accessToken: token)
+            return try await performFetch(accessToken: token, allowRetry: true)
         } catch {
             throw error
         }
     }
 
-    private func performFetch(accessToken: String) async throws(ProviderError) -> PlanUsage {
+    private func performFetch(accessToken: String, allowRetry: Bool) async throws(ProviderError) -> PlanUsage {
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -105,7 +105,12 @@ actor KimiAPIClient {
         }
 
         if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-            throw .notAuthenticated
+            // access_token 可能刚过期，尝试强制刷新一次并重试。
+            guard allowRetry else {
+                throw .notAuthenticated
+            }
+            let newToken = try await auth.forceRefresh()
+            return try await performFetch(accessToken: newToken, allowRetry: false)
         }
 
         if httpResponse.statusCode >= 400 {
