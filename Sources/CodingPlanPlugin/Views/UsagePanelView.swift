@@ -63,7 +63,7 @@ struct UsagePanelView: View {
         }
         .onAppear {
             Task {
-                await refreshMissingSnapshots()
+                await refresh()
             }
         }
         .onChange(of: manager.selectedID) { _ in
@@ -403,24 +403,6 @@ struct UsagePanelView: View {
         isLoading = true
         defer { isLoading = false }
         await manager.refreshExistingSnapshots()
-        syncAppStateForCurrent()
-    }
-
-    private func refreshMissingSnapshots() async {
-        let missingIDs = manager.configurations.compactMap { config in
-            manager.usageSnapshots[config.id] == nil ? config.id : nil
-        }
-        guard !missingIDs.isEmpty else { return }
-        guard !isLoading else { return }
-        isLoading = true
-        defer { isLoading = false }
-        await withTaskGroup(of: Void.self) { group in
-            for id in missingIDs {
-                group.addTask {
-                    await self.manager.refreshSnapshot(for: id)
-                }
-            }
-        }
         syncAppStateForCurrent()
     }
 
