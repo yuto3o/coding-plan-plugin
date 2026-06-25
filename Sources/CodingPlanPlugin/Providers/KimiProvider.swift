@@ -11,7 +11,9 @@ struct KimiProvider: Provider {
     init(id: String = "kimi", name: String = "Kimi Code") {
         self.id = id
         self.name = name
-        self.auth = KimiCodeAuthService(id: id)
+        // Kimi Code 全局只有一份 OAuth token，统一使用 shared 实例，
+        // 避免不同卡片 id 创建独立的 auth service 导致无法命中 Keychain 中的统一凭证。
+        self.auth = KimiCodeAuthService.shared
         self.api = KimiAPIClient(auth: auth)
     }
 
